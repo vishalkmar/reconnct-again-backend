@@ -11,6 +11,11 @@ const avatarUploader = buildUploader('user-avatars', {
   allowed: /jpeg|jpg|png|gif|webp/,
   message: 'Only image files are allowed',
 });
+// Documents (e.g. B2B contracts) — PDFs and common doc/image formats.
+const documentUploader = buildUploader('documents', {
+  allowed: /pdf|doc|docx|jpeg|jpg|png|webp/,
+  message: 'Only PDF, DOC/DOCX or image files are allowed',
+});
 
 // POST /api/uploads/inline  (admin) — single image used inline in rich-text
 // editors (e.g. custom bullet/marker icons). Returns the public URL.
@@ -22,6 +27,19 @@ router.post(
     if (!req.file) return fail(res, 'No file uploaded', 400);
     const url = getUploadedUrl(req.file);
     return ok(res, { url }, 'Uploaded');
+  })
+);
+
+// POST /api/uploads/document  (admin) — single document (PDF/DOC/image), e.g.
+// a supplier's B2B contract. Returns the public URL.
+router.post(
+  '/document',
+  authenticate,
+  documentUploader.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) return fail(res, 'No file uploaded', 400);
+    const url = getUploadedUrl(req.file);
+    return ok(res, { url, name: req.file.originalname }, 'Uploaded');
   })
 );
 

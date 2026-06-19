@@ -51,6 +51,8 @@ const ExperienceAudience = require('./experienceAudience.model');
 const ExperienceCategory = require('./experienceCategory.model');
 const ExperienceType = require('./experienceType.model');
 const Experience = require('./experience.model');
+const Supplier = require('./supplier.model');
+const Contract = require('./contract.model');
 
 const db = {
   sequelize,
@@ -106,6 +108,8 @@ const db = {
   ExperienceCategory,
   ExperienceType,
   Experience,
+  Supplier,
+  Contract,
 };
 
 // ─── Users: self-reference for referrals ──────────────────────────────────
@@ -443,6 +447,14 @@ Experience.belongsTo(ExperienceCategory, { foreignKey: 'categoryId', as: 'catego
 ExperienceCategory.hasMany(Experience, { foreignKey: 'categoryId', as: 'experiences' });
 Experience.belongsTo(ExperienceType, { foreignKey: 'typeId', as: 'type' });
 ExperienceType.hasMany(Experience, { foreignKey: 'typeId', as: 'experiences' });
+
+// An Experience optionally belongs to one Supplier; a supplier runs many.
+Experience.belongsTo(Supplier, { foreignKey: 'supplierId', as: 'supplier' });
+Supplier.hasMany(Experience, { foreignKey: 'supplierId', as: 'experiences', onDelete: 'SET NULL' });
+
+// Contracts belong to a Supplier (one supplier → many contracts).
+Contract.belongsTo(Supplier, { foreignKey: 'supplierId', as: 'supplier' });
+Supplier.hasMany(Contract, { foreignKey: 'supplierId', as: 'contracts', onDelete: 'CASCADE' });
 
 // PWA models register themselves with sequelize on require. We pull them in
 // here so a single `require('./models')` from app/server boots both worlds.

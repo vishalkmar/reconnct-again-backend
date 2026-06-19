@@ -22,6 +22,8 @@ const Experience = sequelize.define(
     audiences: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }, // [audienceId,…]
     categoryId: { type: DataTypes.INTEGER, allowNull: true },
     typeId: { type: DataTypes.INTEGER, allowNull: true },
+    // Optional owning supplier (admin "Suppliers" tab).
+    supplierId: { type: DataTypes.INTEGER, allowNull: true },
 
     // ── Core details (Task 4) ────────────────────────────────────────────
     location: { type: DataTypes.STRING(255), allowNull: true },
@@ -49,12 +51,18 @@ const Experience = sequelize.define(
 
     // ── Tax & discount (GST task) ────────────────────────────────────────
     gstRate: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // 0/5/12/18/28
-    tcsRate: { type: DataTypes.DECIMAL(5, 2), allowNull: false, defaultValue: 0 }, // 0/1/2/5
     discount: { type: DataTypes.JSON, allowNull: true }, // { type:'percentage'|'fixed', value }
+    // Convenience fee — applied on the FINAL amount (net + GST), after discount.
+    // { type:'free'|'fixed'|'percentage', value, months, cutThrough }
+    convenienceFee: { type: DataTypes.JSON, allowNull: true },
 
     // ── Rich-text blocks & repeaters ─────────────────────────────────────
     termsConditions: { type: DataTypes.TEXT('long'), allowNull: true },
     privacyPolicy: { type: DataTypes.TEXT('long'), allowNull: true },
+    // Single merged block (the form's "Refund & Cancellation Policy").
+    refundCancellationPolicy: { type: DataTypes.TEXT('long'), allowNull: true },
+    // Deprecated — kept so existing data isn't dropped by sync({ alter }); the
+    // form/view fall back to these when refundCancellationPolicy is empty.
     refundPolicy: { type: DataTypes.TEXT('long'), allowNull: true },
     cancellationPolicy: { type: DataTypes.TEXT('long'), allowNull: true },
     inclusions: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }, // [{kind,title,image,text}]

@@ -47,6 +47,8 @@ router.use('/contact', require('./contact.routes'));
 // categories / dependent types).
 router.use('/experience-taxonomy', require('./experienceTaxonomy.routes'));
 router.use('/experiences', require('./experience.routes'));
+router.use('/suppliers', require('./supplier.routes'));
+router.use('/contracts', require('./contract.routes'));
 
 // Revenue analytics (admin dashboard).
 router.use('/admin/analytics', require('./analytics.routes'));

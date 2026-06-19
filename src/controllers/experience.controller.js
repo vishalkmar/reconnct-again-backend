@@ -2,17 +2,17 @@ const asyncHandler = require('express-async-handler');
 const slugify = require('slugify');
 const { Op } = require('sequelize');
 const {
-  Experience, ExperienceCategory, ExperienceType, ExperienceAudience,
+  Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier,
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
 const WRITABLE = [
-  'name', 'audiences', 'categoryId', 'typeId', 'location', 'city', 'nearbyLocation', 'latitude', 'longitude',
+  'name', 'audiences', 'categoryId', 'typeId', 'supplierId', 'location', 'city', 'nearbyLocation', 'latitude', 'longitude',
   'rating', 'about', 'mainImage', 'gallery', 'videos', 'mode', 'status',
-  'priceMethod', 'pricing', 'currency', 'gstRate', 'tcsRate', 'discount',
-  'termsConditions', 'privacyPolicy', 'refundPolicy', 'cancellationPolicy',
+  'priceMethod', 'pricing', 'currency', 'gstRate', 'discount', 'convenienceFee',
+  'termsConditions', 'privacyPolicy', 'refundCancellationPolicy',
   'inclusions', 'faqs', 'facilities', 'nearbyPlaces', 'schedule', 'data',
   'isActive', 'isFeatured', 'sortOrder',
 ];
@@ -39,6 +39,7 @@ const pickWritable = (body) => {
 const INCLUDE = [
   { model: ExperienceCategory, as: 'category', attributes: ['id', 'name', 'slug', 'icon', 'colorHex'] },
   { model: ExperienceType, as: 'type', attributes: ['id', 'name', 'slug', 'categoryId'] },
+  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'phone', 'email', 'image'] },
 ];
 
 // Attach the hydrated audience objects (the row stores only their ids).
@@ -59,6 +60,8 @@ const list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.query.status) where.status = req.query.status;
   if (req.query.categoryId) where.categoryId = parseInt(req.query.categoryId, 10);
+  if (req.query.typeId) where.typeId = parseInt(req.query.typeId, 10);
+  if (req.query.supplierId) where.supplierId = parseInt(req.query.supplierId, 10);
   if (req.query.q) where.name = { [Op.like]: `%${req.query.q}%` };
   const items = await Experience.findAll({
     where,
