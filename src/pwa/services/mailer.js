@@ -4,6 +4,7 @@ const nodemailer = require('nodemailer');
 
 const FROM = () =>
   process.env.MAIL_FROM ||
+  process.env.EMAIL_FROM ||
   process.env.SMTP_FROM ||
   process.env.BREVO_FROM ||
   'Retreats by Traveon <no-reply@traveon.com>';
@@ -128,7 +129,27 @@ const send = async ({ to, subject, html, text, replyTo, attachments }) => {
     throw new Error('Email recipient missing. Pass `to` or set SMTP_TO in .env');
   }
 
-  // 1) Preferred: SMTP (any provider, no IP allow-list). Used when SMTP_HOST set.
+  // 1) Preferred: Brevo transactional HTTP API. Hosts like Render block
+  //    outbound SMTP (ports 25/465/587), so when a Brevo API key is present we
+  //    send over HTTPS — which is never blocked. API-key auth is not tied to an
+  //    IP allow-list, so it works from any (even changing) server IP.
+  if (process.env.BREVO_API_KEY) {
+    return postBrevoEmail({
+      sender: parseAddress(FROM()),
+      to: recipients,
+      replyTo: replyTo ? parseAddress(replyTo) : undefined,
+      subject,
+      htmlContent: html,
+      textContent: text,
+      attachment: attachments?.map((attachment) => ({
+        name: attachment.filename,
+        content: Buffer.from(attachment.content).toString('base64'),
+      })),
+    });
+  }
+
+  // 2) Fallback: plain SMTP (any provider) — used in environments where SMTP is
+  //    allowed and no Brevo key is configured (e.g. local dev with Gmail).
   const transport = getSmtpTransport();
   if (transport) {
     return transport.sendMail({
@@ -145,23 +166,7 @@ const send = async ({ to, subject, html, text, replyTo, attachments }) => {
     });
   }
 
-  // 2) Fallback: Brevo transactional HTTP API (legacy — subject to IP allow-list).
-  if (!process.env.BREVO_API_KEY) {
-    throw new Error('No email transport configured. Set SMTP_HOST (+ SMTP_USER/SMTP_PASS) or BREVO_API_KEY in .env');
-  }
-
-  return postBrevoEmail({
-    sender: parseAddress(FROM()),
-    to: recipients,
-    replyTo: replyTo ? parseAddress(replyTo) : undefined,
-    subject,
-    htmlContent: html,
-    textContent: text,
-    attachment: attachments?.map((attachment) => ({
-      name: attachment.filename,
-      content: Buffer.from(attachment.content).toString('base64'),
-    })),
-  });
+  throw new Error('No email transport configured. Set BREVO_API_KEY (preferred) or SMTP_HOST (+ SMTP_USER/SMTP_PASS) in .env');
 };
 
 // Convenience helpers keep templates inline so they can later move out
