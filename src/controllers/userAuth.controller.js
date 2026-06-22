@@ -14,6 +14,13 @@ const { creditReferrerForFirstLogin } = require('../services/referEarn.service')
 
 const normalize = (email) => String(email || '').toLowerCase().trim();
 
+// ── Phase-1 demo login backdoor ──────────────────────────────────────────
+// A fixed email + OTP so the mobile app can be opened for UI review without a
+// live inbox. NOTE: remove (or gate behind an env flag) before going live.
+const DEMO_EMAIL = 'demo@reconnct.app';
+const DEMO_CODE = '123456';
+const isDemo = (email) => normalize(email) === DEMO_EMAIL;
+
 const issueAuthToken = (user) =>
   signToken({ id: user.id, kind: 'user', email: user.email }, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
 
@@ -54,6 +61,13 @@ const requestOtp = asyncHandler(async (req, res) => {
   const email = normalize(req.body.email);
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return fail(res, 'Please provide a valid email address', 400);
+  }
+
+  // Demo account: never send a real email, just let the app move to the OTP
+  // screen. The fixed code is accepted in verifyOtp below.
+  if (isDemo(email)) {
+    return ok(res, { email, isNewUser: false, expiresInMinutes: 10, emailDelivered: true },
+      'OTP sent — use the demo code to sign in');
   }
 
   const existing = await User.findOne({ where: { email } });
@@ -114,7 +128,10 @@ const verifyOtpCtrl = asyncHandler(async (req, res) => {
   const code = String(req.body.code || '').trim();
   if (!email || !code) return fail(res, 'Email and code are required', 400);
 
-  const result = await verifyOtp({ email, purpose: 'login_signup', code });
+  // Demo account bypass — accept the fixed code, skip the OTP store entirely.
+  const result = (isDemo(email) && code === DEMO_CODE)
+    ? { ok: true }
+    : await verifyOtp({ email, purpose: 'login_signup', code });
   if (!result.ok) {
     const messages = {
       expired: 'This code has expired. Please request a new one.',
@@ -129,6 +146,13 @@ const verifyOtpCtrl = asyncHandler(async (req, res) => {
   if (!user) {
     user = await User.create({ email, isProfileComplete: false });
     didCreate = true;
+  }
+
+  // Demo account is pre-completed so it lands straight on Home for UI review.
+  if (isDemo(email) && !user.isProfileComplete) {
+    user.name = user.name || 'Demo Explorer';
+    user.phone = user.phone || '9999999999';
+    user.isProfileComplete = true;
   }
 
   user.lastLoginAt = new Date();
