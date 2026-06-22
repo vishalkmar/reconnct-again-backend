@@ -14,7 +14,7 @@ const DEFAULTS = {
   login: {
     brandTitle: 'reconnct',
     tagline: 'Experiences that connect',
-    heroMedia: { type: 'image', url: 'https://picsum.photos/seed/reconnct-hero/900/1100' },
+    heroMedia: { type: 'image', url: 'https://images.unsplash.com/photo-1488646953014-85cb44e25828?w=900&q=80' },
     headline: 'Let’s get you started',
     subtitle: 'Enter your email to discover amazing experiences around you.',
     buttonText: 'Send OTP',
@@ -23,7 +23,7 @@ const DEFAULTS = {
     // OTP step
     otpHeadline: 'Almost there!',
     otpSubtitle: 'We’ve sent a 6-digit code to',
-    otpMedia: { type: 'image', url: 'https://picsum.photos/seed/reconnct-otp/900/700' },
+    otpMedia: { type: 'image', url: 'https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?w=900&q=80' },
     secureText: 'Secure & encrypted',
   },
 };

@@ -95,9 +95,16 @@ const run = async () => {
         text: pick(REVIEW_TEXTS, n + k),
       }));
 
-      const imgSeed = `${cat.slug}-${type.slug}`;
-      const mainImage = `https://picsum.photos/seed/${imgSeed}/900/600`;
-      const gallery = [1, 2, 3].map((g) => `https://picsum.photos/seed/${imgSeed}-${g}/900/600`);
+      // Unsplash (reachable on-device; picsum was timing out). Themed-ish pool.
+      const IMGS = [
+        '1517836357463-d25dfeac3438', '1506905925346-21bda4d32df4', '1469854523086-cc02fe5d8800',
+        '1533105079780-92b9be482077', '1530789253388-582c481c54b0', '1507525428034-b723cf961d3e',
+        '1540206395-68808572332f', '1464822759023-fed622ff2c3b', '1488646953014-85cb44e25828',
+        '1497436072909-60f360e1d4b1', '1476514525535-07fb3b4ae5f1', '1454496522488-7a8e488e8606',
+      ];
+      const U = (id) => `https://images.unsplash.com/photo-${id}?w=800&q=80`;
+      const mainImage = U(IMGS[n % IMGS.length]);
+      const gallery = [1, 2, 3].map((g) => U(IMGS[(n + g) % IMGS.length]));
 
       await Experience.create({
         name,
