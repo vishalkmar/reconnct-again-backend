@@ -7,12 +7,14 @@ const {
   Event,
   EventType,
   AddOnActivity,
+  Experience,
+  ExperienceCategory,
   Location,
   City,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 
-const ALLOWED_TYPES = ['package', 'room', 'event', 'addon'];
+const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'experience'];
 
 // Fetch the underlying bookable entity in a uniform shape. Returning `null`
 // signals a dangling wishlist row (item deleted/deactivated) so the list
@@ -104,6 +106,33 @@ const hydrateEntity = async (entityType, entityId) => {
         isSport: !!json.eventType?.isSport,
       },
       detailHref: `/events/${json.slug}`,
+    };
+  }
+
+  if (entityType === 'experience') {
+    const exp = await Experience.findByPk(entityId, {
+      attributes: ['id', 'name', 'slug', 'mainImage', 'city', 'location', 'rating', 'pricing', 'priceMethod', 'currency', 'status', 'isActive'],
+      include: [{ model: ExperienceCategory, as: 'category', attributes: ['id', 'name'] }],
+    });
+    if (!exp || exp.isActive === false || exp.status !== 'published') return null;
+    const json = exp.toJSON();
+    const adult = Number(json.pricing && json.pricing.adultPrice) || 0;
+    return {
+      type: 'experience',
+      id: json.id,
+      name: json.name,
+      slug: json.slug,
+      image: json.mainImage,
+      mainImage: json.mainImage,
+      price: adult,
+      fromPrice: adult,
+      priceUnit: 'person',
+      currency: json.currency || 'INR',
+      rating: Number(json.rating) || 0,
+      city: json.city,
+      category: json.category ? { id: json.category.id, name: json.category.name } : null,
+      location: json.location || json.city || null,
+      detailHref: `/experiences/${json.slug}`,
     };
   }
 
