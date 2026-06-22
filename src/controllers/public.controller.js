@@ -116,6 +116,8 @@ const detailShape = async (exp) => {
     refundCancellationPolicy: j.refundCancellationPolicy || j.refundPolicy || j.cancellationPolicy || null,
     termsConditions: j.termsConditions || null,
     gstRate: j.gstRate || 0,
+    discount: j.discount || null,            // { type:'percentage'|'fixed', value }
+    convenienceFee: j.convenienceFee || null, // { type:'free'|'fixed'|'percentage', value }
     priceMethod: j.priceMethod || 'per_person',
     pricing: j.pricing || {},
     childBands: childBands(j),

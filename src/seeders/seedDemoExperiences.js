@@ -131,6 +131,7 @@ const run = async () => {
         currency: 'INR',
         gstRate: 5,
         discount: n % 4 === 0 ? { type: 'percentage', value: 10 } : null,
+        convenienceFee: n % 3 === 0 ? { type: 'percentage', value: 2 } : { type: 'fixed', value: 49 },
         inclusions,
         faqs,
         facilities: FACILITIES_POOL.slice(0, 3 + (n % 3)),
