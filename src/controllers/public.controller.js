@@ -4,6 +4,7 @@ const {
   Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
+const { coordsForCity, haversineKm } = require('./geo.controller');
 
 /*
   PUBLIC (no-auth) surface for the mobile app (reconnct).
@@ -140,6 +141,8 @@ const listExperiences = asyncHandler(async (req, res) => {
     ];
   }
 
+  if (req.query.city) where.city = { [Op.like]: `%${req.query.city}%` };
+
   let items = await Experience.findAll({
     where,
     include: INCLUDE,
@@ -159,6 +162,22 @@ const listExperiences = asyncHandler(async (req, res) => {
   const max = req.query.priceMax != null ? Number(req.query.priceMax) : null;
   if (min != null) cards = cards.filter((c) => c.fromPrice >= min);
   if (max != null) cards = cards.filter((c) => c.fromPrice <= max);
+
+  // Distance + nearest-first ordering when the app sends the user's coords.
+  const lat = req.query.lat != null ? Number(req.query.lat) : null;
+  const lon = req.query.lon != null ? Number(req.query.lon) : null;
+  if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
+    cards = cards.map((c) => {
+      const co = coordsForCity(c.city) || coordsForCity(c.location);
+      c.distanceKm = co ? haversineKm(lat, lon, co[0], co[1]) : null;
+      return c;
+    });
+    cards.sort((a, b) => {
+      if (a.distanceKm == null) return 1;
+      if (b.distanceKm == null) return -1;
+      return a.distanceKm - b.distanceKm;
+    });
+  }
 
   return ok(res, { items: cards, count: cards.length });
 });
@@ -187,4 +206,21 @@ const taxonomy = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listExperiences, getExperience, taxonomy };
+// GET /api/public/cities — distinct cities that have ≥1 published experience.
+const cities = asyncHandler(async (req, res) => {
+  const rows = await Experience.findAll({
+    where: { status: 'published', isActive: true },
+    attributes: ['city'],
+  });
+  const counts = {};
+  rows.forEach((r) => {
+    const c = (r.city || '').trim();
+    if (c) counts[c] = (counts[c] || 0) + 1;
+  });
+  const list = Object.entries(counts)
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+  return ok(res, { cities: list });
+});
+
+module.exports = { listExperiences, getExperience, taxonomy, cities };

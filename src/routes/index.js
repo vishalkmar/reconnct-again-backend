@@ -4,6 +4,8 @@ router.use('/auth', require('./auth.routes'));
 router.use('/user-auth', require('./userAuth.routes'));
 // Public, no-auth surface for the reconnct mobile app (cards / detail / filters).
 router.use('/public', require('./public.routes'));
+// Admin "App Screens Control" (mobile login/OTP content + media).
+router.use('/admin/app-screens', require('./appScreen.routes'));
 router.use('/wishlist', require('./wishlist.routes'));
 router.use('/bookings', require('./booking.routes'));
 router.use('/payments', require('./payment.routes'));
