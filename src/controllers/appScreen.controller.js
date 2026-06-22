@@ -56,4 +56,44 @@ const updateScreen = asyncHandler(async (req, res) => {
   return ok(res, { key, content: merged }, 'App screen updated');
 });
 
-module.exports = { getScreen, updateScreen, DEFAULTS };
+// ── Offer banners (auto-sliding carousel on Home) ────────────────────────
+// type: 'image' (plain advert) | 'image_text' (image + title/subtitle + CTA)
+const BANNER_KEY = 'offer_banners';
+const DEFAULT_BANNERS = [
+  {
+    id: 1, type: 'image_text', active: true,
+    image: 'https://images.unsplash.com/photo-1469474968028-56623f02e42e?w=1000&q=80',
+    title: 'EARLY BIRD SPECIAL', subtitle: 'Unlock exclusive adventures! Book now',
+    ctaText: 'BOOK NOW', ctaLink: '',
+  },
+  {
+    id: 2, type: 'image_text', active: true,
+    image: 'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?w=1000&q=80',
+    title: 'WEEKEND ESCAPES', subtitle: 'Up to 20% off coastal getaways',
+    ctaText: 'EXPLORE', ctaLink: '',
+  },
+];
+
+// GET /api/public/offer-banners
+const getBanners = asyncHandler(async (req, res) => {
+  const row = await SiteSetting.findOne({ where: { key: BANNER_KEY } });
+  const banners = (row && Array.isArray(row.value)) ? row.value : DEFAULT_BANNERS;
+  return ok(res, { banners: banners.filter((b) => b && b.active !== false) });
+});
+
+// GET /api/admin/offer-banners (admin) — full list incl. inactive
+const adminGetBanners = asyncHandler(async (req, res) => {
+  const row = await SiteSetting.findOne({ where: { key: BANNER_KEY } });
+  return ok(res, { banners: (row && Array.isArray(row.value)) ? row.value : DEFAULT_BANNERS });
+});
+
+// PUT /api/admin/offer-banners (admin) — body: { banners: [...] }
+const updateBanners = asyncHandler(async (req, res) => {
+  const banners = Array.isArray(req.body.banners) ? req.body.banners : [];
+  const [row] = await SiteSetting.findOrCreate({ where: { key: BANNER_KEY }, defaults: { key: BANNER_KEY, value: banners } });
+  row.value = banners;
+  await row.save();
+  return ok(res, { banners }, 'Offer banners saved');
+});
+
+module.exports = { getScreen, updateScreen, getBanners, adminGetBanners, updateBanners, DEFAULTS };

@@ -14,6 +14,7 @@ router.get('/experiences/:idOrSlug', c.getExperience);
 
 // App Screens Control (login/OTP content + media)
 router.get('/app-screen/:key', appScreen.getScreen);
+router.get('/offer-banners', appScreen.getBanners);
 
 // Location intelligence — detect city by IP, nearby suggestions via LLM.
 router.get('/geo/locate', geo.locate);
