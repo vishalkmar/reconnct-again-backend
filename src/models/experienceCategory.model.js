@@ -16,6 +16,10 @@ const ExperienceCategory = sequelize.define(
     description: { type: DataTypes.STRING(255), allowNull: true },
     icon: { type: DataTypes.STRING(40), allowNull: true, comment: 'Optional emoji / icon key' },
     colorHex: { type: DataTypes.STRING(9), allowNull: true, comment: 'Optional accent colour' },
+    // Which audiences this category belongs to (audience slugs). Empty = shows
+    // for every audience (so legacy categories keep working). Drives the admin
+    // form's "select audience → filter categories" behaviour.
+    audiences: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
     isCustom: { type: DataTypes.BOOLEAN, defaultValue: false },
     sortOrder: { type: DataTypes.INTEGER, defaultValue: 0 },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },

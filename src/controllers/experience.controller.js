@@ -9,7 +9,7 @@ const { ok, created, fail } = require('../utils/response');
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
 const WRITABLE = [
-  'name', 'audiences', 'categoryId', 'typeId', 'supplierId', 'location', 'city', 'nearbyLocation', 'latitude', 'longitude',
+  'name', 'audiences', 'categoryId', 'typeId', 'supplierId', 'showSupplierPublic', 'location', 'city', 'nearbyLocation', 'latitude', 'longitude',
   'rating', 'about', 'mainImage', 'gallery', 'videos', 'mode', 'status',
   'priceMethod', 'pricing', 'currency', 'gstRate', 'discount', 'convenienceFee',
   'termsConditions', 'privacyPolicy', 'refundCancellationPolicy',

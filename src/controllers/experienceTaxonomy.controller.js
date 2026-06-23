@@ -92,6 +92,7 @@ const createCategory = asyncHandler(async (req, res) => {
     description: description || null,
     icon: icon || null,
     colorHex: colorHex || null,
+    audiences: Array.isArray(req.body.audiences) ? req.body.audiences : [],
     isCustom: req.body.isCustom === undefined ? true : !!req.body.isCustom,
     sortOrder: Number(req.body.sortOrder) || 0,
   });
@@ -108,6 +109,7 @@ const updateCategory = asyncHandler(async (req, res) => {
   if (req.body.description !== undefined) item.description = req.body.description || null;
   if (req.body.icon !== undefined) item.icon = req.body.icon || null;
   if (req.body.colorHex !== undefined) item.colorHex = req.body.colorHex || null;
+  if (req.body.audiences !== undefined && Array.isArray(req.body.audiences)) item.audiences = req.body.audiences;
   if (req.body.sortOrder !== undefined && req.body.sortOrder !== '') item.sortOrder = parseInt(req.body.sortOrder, 10);
   if (req.body.isActive !== undefined) item.isActive = req.body.isActive === true || req.body.isActive === 'true';
   await item.save();

@@ -14,6 +14,7 @@
     "seed:test": "node src/seeders/seedTestData.js",
     "seed:experience": "node src/seeders/seedExperienceTaxonomy.js",
     "seed:demo": "node src/seeders/seedDemoExperiences.js",
+    "seed:reconnct-taxonomy": "node src/seeders/seedReconnctTaxonomy.js",
     "cleanup-indexes": "node src/scripts/cleanupIndexes.js"
   },
   "keywords": [

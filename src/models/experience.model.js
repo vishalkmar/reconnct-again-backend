@@ -24,6 +24,8 @@ const Experience = sequelize.define(
     typeId: { type: DataTypes.INTEGER, allowNull: true },
     // Optional owning supplier (admin "Suppliers" tab).
     supplierId: { type: DataTypes.INTEGER, allowNull: true },
+    // Whether the supplier's info is shown publicly (website + app). Admin toggle.
+    showSupplierPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 
     // ── Core details (Task 4) ────────────────────────────────────────────
     location: { type: DataTypes.STRING(255), allowNull: true },

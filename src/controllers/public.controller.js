@@ -123,7 +123,8 @@ const detailShape = async (exp) => {
     childBands: childBands(j),
     schedule: j.schedule || {},
     reviews: Array.isArray(j.data && j.data.reviews) ? j.data.reviews : [],
-    supplier: j.supplier
+    // Supplier shown publicly only when the admin toggle allows it.
+    supplier: (j.showSupplierPublic !== false && j.supplier)
       ? { id: j.supplier.id, name: j.supplier.supplierName || j.supplier.companyName, image: j.supplier.image }
       : null,
   };
