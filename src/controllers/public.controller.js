@@ -205,7 +205,7 @@ const taxonomy = asyncHandler(async (req, res) => {
   ]);
   return ok(res, {
     audiences: audiences.map((a) => ({ id: a.id, name: a.name, slug: a.slug, icon: a.icon })),
-    categories: categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon, colorHex: c.colorHex })),
+    categories: categories.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon, colorHex: c.colorHex, audiences: Array.isArray(c.audiences) ? c.audiences : [] })),
   });
 });
 
