@@ -172,6 +172,33 @@ const createOrder = async ({
 };
 
 /**
+ * Create a Cashfree hosted Payment Link and return its checkout URL. Used by the
+ * mobile app: the app POSTs the booking amount to our backend, we create the
+ * link server-to-server (so the secret never ships in the APK and the call is
+ * reliable), and the app opens `linkUrl` in the browser to pay.
+ */
+const createPaymentLink = async ({ linkId, amount, currency = 'INR', customer = {}, purpose, returnUrl }) => {
+  // A valid customer_phone is required by Cashfree; fall back to a placeholder
+  // Indian number when the guest hasn't provided one (sandbox accepts it).
+  const phone = normalizePhone(customer.phone) || '+919999999999';
+  const body = {
+    link_id: String(linkId),
+    link_amount: Number(amount),
+    link_currency: currency,
+    link_purpose: String(purpose || 'reconnct experience').slice(0, 100),
+    customer_details: {
+      customer_phone: phone,
+      customer_name: customer.name || 'Guest',
+      customer_email: customer.email || 'guest@reconnct.app',
+    },
+    link_notify: { send_sms: false, send_email: false },
+    ...(returnUrl ? { link_meta: { return_url: returnUrl } } : {}),
+  };
+  const res = await cashfreeRequest({ method: 'POST', path: '/links', body });
+  return { linkUrl: res.link_url, linkId: res.link_id, raw: res };
+};
+
+/**
  * Look up the current status of a Cashfree order. We call this from BOTH the
  * return-URL handler (when the browser comes back) AND the webhook handler,
  * so we have a single canonical "what does Cashfree say?" answer and never
@@ -255,6 +282,7 @@ module.exports = {
   resolveMode,
   apiBase,
   createOrder,
+  createPaymentLink,
   getOrder,
   isPaid,
   verifyWebhookSignature,

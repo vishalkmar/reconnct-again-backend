@@ -5,6 +5,7 @@ const {
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { coordsForCity, haversineKm } = require('./geo.controller');
+const cashfree = require('../services/cashfree.service');
 
 /*
   PUBLIC (no-auth) surface for the mobile app (reconnct).
@@ -209,6 +210,40 @@ const taxonomy = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/public/types?categoryId=  — types for a category (host onboarding).
+const types = asyncHandler(async (req, res) => {
+  const categoryId = req.query.categoryId ? Number(req.query.categoryId) : null;
+  const where = { isActive: true };
+  if (categoryId) where.categoryId = categoryId;
+  const rows = await ExperienceType.findAll({
+    where,
+    order: [['sortOrder', 'ASC'], ['name', 'ASC']],
+    attributes: ['id', 'name', 'slug', 'categoryId'],
+  });
+  return ok(res, { types: rows.map((t) => ({ id: t.id, name: t.name, slug: t.slug, categoryId: t.categoryId })) });
+});
+
+// POST /api/public/payments/cashfree-link — create a Cashfree hosted payment
+// link for the mobile app to open. Done server-side so the secret stays on the
+// backend and the call is reliable (the device only talks to our API).
+const cashfreeLink = asyncHandler(async (req, res) => {
+  const { amount, name, phone, email, purpose } = req.body || {};
+  const amt = Math.round(Number(amount) || 0);
+  if (!amt || amt < 1) return fail(res, 'A valid amount is required to start the payment.', 400);
+  if (!cashfree.isConfigured()) return fail(res, 'Payments are not configured on the server.', 503);
+
+  const linkId = `rc_${Date.now()}_${Math.floor(1000 + Math.random() * 8999)}`;
+  try {
+    const { linkUrl, linkId: id } = await cashfree.createPaymentLink({
+      linkId, amount: amt, customer: { name, phone, email }, purpose,
+    });
+    if (!linkUrl) return fail(res, 'Could not create the payment link. Please try again.', 502);
+    return ok(res, { linkUrl, linkId: id });
+  } catch (e) {
+    return fail(res, e.message || 'Could not start the Cashfree payment.', 502);
+  }
+});
+
 // GET /api/public/cities — distinct cities that have ≥1 published experience.
 const cities = asyncHandler(async (req, res) => {
   const rows = await Experience.findAll({
@@ -226,4 +261,4 @@ const cities = asyncHandler(async (req, res) => {
   return ok(res, { cities: list });
 });
 
-module.exports = { listExperiences, getExperience, taxonomy, cities };
+module.exports = { listExperiences, getExperience, taxonomy, types, cities, cashfreeLink };

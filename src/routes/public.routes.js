@@ -8,7 +8,11 @@ const geo = require('../controllers/geo.controller');
   Mounted at /api/public. Auth (OTP) for the app reuses /api/user-auth/*.
 */
 router.get('/taxonomy', c.taxonomy);
+router.get('/types', c.types);
 router.get('/cities', c.cities);
+
+// Mobile payments — create a Cashfree hosted link server-side.
+router.post('/payments/cashfree-link', c.cashfreeLink);
 router.get('/experiences', c.listExperiences);
 router.get('/experiences/:idOrSlug', c.getExperience);
 
