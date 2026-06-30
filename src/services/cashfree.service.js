@@ -198,6 +198,15 @@ const createPaymentLink = async ({ linkId, amount, currency = 'INR', customer = 
   return { linkUrl: res.link_url, linkId: res.link_id, raw: res };
 };
 
+/** Fetch a payment link's current state (used to poll whether it's been paid). */
+const getPaymentLink = async (linkId) =>
+  cashfreeRequest({ method: 'GET', path: `/links/${encodeURIComponent(linkId)}` });
+
+/** A Cashfree payment link is settled when its status is PAID (or fully paid). */
+const isLinkPaid = (link) =>
+  String(link?.link_status || '').toUpperCase() === 'PAID'
+  || (Number(link?.link_amount_paid || 0) > 0 && Number(link.link_amount_paid) >= Number(link.link_amount || 0));
+
 /**
  * Look up the current status of a Cashfree order. We call this from BOTH the
  * return-URL handler (when the browser comes back) AND the webhook handler,
@@ -283,6 +292,8 @@ module.exports = {
   apiBase,
   createOrder,
   createPaymentLink,
+  getPaymentLink,
+  isLinkPaid,
   getOrder,
   isPaid,
   verifyWebhookSignature,

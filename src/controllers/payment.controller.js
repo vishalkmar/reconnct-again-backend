@@ -4,6 +4,9 @@ const { ok, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
 const {
   createOrder: cfCreateOrder,
+  createPaymentLink: cfCreatePaymentLink,
+  getPaymentLink: cfGetPaymentLink,
+  isLinkPaid: cfIsLinkPaid,
   getOrder: cfGetOrder,
   isPaid: cfIsPaid,
   isConfigured: cfConfigured,
@@ -65,6 +68,105 @@ const confirmBookingFromCashfree = async (booking, cfOrder) => {
 
   return booking;
 };
+
+// Promote a booking to "confirmed" once its Cashfree payment LINK is paid.
+// Mirror of confirmBookingFromCashfree but for the mobile hosted-link flow.
+const confirmBookingFromLink = async (booking, link) => {
+  if (!booking) return null;
+  if (booking.status === 'confirmed' || booking.status === 'completed') return booking;
+
+  booking.status = 'confirmed';
+  booking.paymentId = link?.cf_link_id ? String(link.cf_link_id) : booking.paymentId;
+  booking.paymentMethod = 'cashfree_link';
+  booking.paidAt = new Date();
+  booking.paymentRaw = link;
+  await booking.save();
+
+  // Voucher / confirmation email — fire-and-forget so a flaky SMTP never makes
+  // a successful payment look failed.
+  sendBookingConfirmation({ booking })
+    .catch((err) => console.error('[payment] booking confirmation email failed:', err.message));
+  creditReferrerForFirstPaid({ booking })
+    .catch((err) => console.error('[payment] referrer payout failed:', err.message));
+
+  return booking;
+};
+
+// POST /api/payments/links/:code  (authenticated user)
+// Mobile flow: create (or reopen) a Cashfree hosted payment LINK for a booking
+// and return its checkout URL. The app opens this in the browser.
+const createLinkForBooking = asyncHandler(async (req, res) => {
+  if (!cfConfigured()) return fail(res, 'Payments are temporarily unavailable. Please try again later.', 503);
+
+  const code = String(req.params.code || '').trim();
+  const booking = await Booking.findOne({ where: { bookingCode: code, userId: req.user.id } });
+  if (!booking) return fail(res, 'Booking not found', 404);
+  if (booking.status === 'confirmed' || booking.status === 'completed') return fail(res, 'This booking has already been paid', 400);
+  if (booking.status === 'cancelled' || booking.status === 'refunded') return fail(res, 'This booking is no longer active', 400);
+
+  const snap = booking.itemSnapshot || {};
+  const customer = { name: booking.guestName, email: booking.guestEmail, phone: booking.guestPhone };
+  const returnUrl = `${clientUrl()}/booking-success/${booking.bookingCode}`;
+
+  try {
+    // Reuse an existing link for this booking if one was already created.
+    let linkId = booking.paymentOrderId;
+    let linkUrl = null;
+    if (linkId) {
+      try { const existing = await cfGetPaymentLink(linkId); linkUrl = existing && existing.link_url; } catch { linkUrl = null; }
+    }
+    if (!linkUrl) {
+      linkId = `${booking.bookingCode}-${Date.now().toString(36)}`;
+      const created = await cfCreatePaymentLink({
+        linkId,
+        amount: fromPaise(booking.totalPaise),
+        currency: booking.currency || 'INR',
+        customer,
+        purpose: snap.name || `Booking ${booking.bookingCode}`,
+        returnUrl,
+      });
+      linkUrl = created.linkUrl;
+      booking.paymentOrderId = linkId;
+      await booking.save();
+    }
+    if (!linkUrl) return fail(res, 'Could not create the payment link. Please try again.', 502);
+    return ok(res, { linkUrl, bookingCode: booking.bookingCode }, 'Payment link ready');
+  } catch (err) {
+    console.error('[payment] createLinkForBooking failed:', err.message, err.body || '');
+    if (err.code === 'invalid_phone') return fail(res, err.message, 400);
+    return fail(res, 'Could not initialise payment. Please try again.', 502);
+  }
+});
+
+// GET /api/payments/link-status/:code  (authenticated user)
+// The app polls this while/after the user pays on the hosted link. We ask
+// Cashfree for the link's authoritative status and, on PAID, confirm the
+// booking (+ send the voucher email). Returns the fresh DB booking.
+const bookingLinkStatus = asyncHandler(async (req, res) => {
+  const code = String(req.params.code || '').trim();
+  const booking = await Booking.findOne({ where: { bookingCode: code, userId: req.user.id } });
+  if (!booking) return fail(res, 'Booking not found', 404);
+
+  if (booking.status === 'confirmed' || booking.status === 'completed') {
+    return ok(res, { paid: true, booking: publicBooking(booking) });
+  }
+  if (!cfConfigured() || !booking.paymentOrderId) {
+    return ok(res, { paid: false, booking: publicBooking(booking) });
+  }
+
+  try {
+    const link = await cfGetPaymentLink(booking.paymentOrderId);
+    if (cfIsLinkPaid(link)) {
+      await confirmBookingFromLink(booking, link);
+      await booking.reload();
+      return ok(res, { paid: true, booking: publicBooking(booking) });
+    }
+    return ok(res, { paid: false, booking: publicBooking(booking), linkStatus: link?.link_status || null });
+  } catch (err) {
+    console.error('[payment] link-status failed:', err.message, err.body || '');
+    return fail(res, 'Could not check payment status. Please try again in a moment.', 502);
+  }
+});
 
 // POST /api/payments/orders/:code  (authenticated user)
 // Creates (or re-uses) a Cashfree order for this booking and returns the
@@ -219,6 +321,8 @@ const webhook = asyncHandler(async (req, res) => {
 
 module.exports = {
   createOrderForBooking,
+  createLinkForBooking,
+  bookingLinkStatus,
   verifyBookingPayment,
   webhook,
 };

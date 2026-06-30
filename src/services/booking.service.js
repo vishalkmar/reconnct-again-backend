@@ -7,6 +7,7 @@ const {
   EventType,
   AddOnActivity,
   EventActivity,
+  Experience,
   Location,
   City,
   Booking,
@@ -15,7 +16,7 @@ const {
 const { priceUnitLabel } = require('../config/priceType');
 
 const TAX_RATE = Number(process.env.BOOKING_TAX_RATE || 0.18); // 18% GST default
-const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'event_activity'];
+const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'event_activity', 'experience'];
 
 const toPaise = (rupees) => Math.round(Number(rupees || 0) * 100);
 const fromPaise = (paise) => Number(paise || 0) / 100;
@@ -201,6 +202,30 @@ const fetchItem = async (type, id) => {
       location: j.city || j.venueName || null,
       detailHref: `/events-activities/${j.slug}`,
       meta: { category: j.category, startDate: j.startDate },
+    };
+  }
+
+  // Experiences (the reconnct mobile app's listings). Booked per person at the
+  // adult price; GST comes from the per-experience gstRate. Single-day.
+  if (type === 'experience') {
+    const ex = await Experience.findByPk(numId);
+    if (!ex || ex.isActive === false || ex.status === 'archived') return null;
+    const j = ex.toJSON();
+    const pricing = j.pricing || {};
+    const price = Number(pricing.adultPrice || pricing.fromPrice || 0);
+    return {
+      type: 'experience',
+      id: j.id,
+      name: j.name,
+      slug: j.slug,
+      image: j.mainImage,
+      price,
+      currency: j.currency || 'INR',
+      gstRate: Number(j.gstRate) || 0,
+      priceType: 'per_person',
+      location: j.city || j.location || null,
+      detailHref: `/experiences/${j.slug}`,
+      meta: { city: j.city, location: j.location, durationLabel: j.durationLabel || null },
     };
   }
 

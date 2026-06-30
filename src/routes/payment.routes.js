@@ -12,4 +12,8 @@ router.post('/webhook', express.raw({ type: '*/*', limit: '1mb' }), ctrl.webhook
 router.post('/orders/:code', authenticateUser, ctrl.createOrderForBooking);
 router.get('/verify/:code', authenticateUser, ctrl.verifyBookingPayment);
 
+// Mobile hosted-link flow: create a payment link for a booking + poll status.
+router.post('/links/:code', authenticateUser, ctrl.createLinkForBooking);
+router.get('/link-status/:code', authenticateUser, ctrl.bookingLinkStatus);
+
 module.exports = router;
