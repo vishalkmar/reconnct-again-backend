@@ -367,6 +367,22 @@ App/reconnct/src/
   `/support` socket + the userAuth fallback must be on Render before the app can
   talk to support.** PDF attachments from the app are a follow-up (image only
   for now; admin supports both).
+- 2026-07-01 — **Phase 7 (polish) done + a correctness fix**:
+  - **Fix**: `support.controller` now returns the standard `{ success, data }`
+    envelope (`ok`/`created`/`fail`) — the app's `request()` reads `json.data`,
+    so the old top-level shape gave `undefined` and broke the app chat load.
+    (Admin page already read defensively; still works.)
+  - **App**: unread badge on the Support entry — Profile (user queue) and Host
+    Profile (supplier queue); SupportScreen re-joins + refetches on socket
+    reconnect (gap-fill, keeps local pending bubbles).
+  - **Admin**: toast on a genuinely-new incoming message (unread went up, not
+    the open thread); on reconnect, resyncs the list + open thread.
+  - **Website**: `pages/user/UserSupportPage.jsx` (member support, user queue,
+    same real-time chat) + route `/dashboard/support` + sidebar entry;
+    `supportSocket` reconnects when the role (admin↔user) changes.
+  - Verified: backend controller loads, frontend `npm run build` passes, app JS
+    bundle builds. Full system (backend + admin + app + website) is
+    feature-complete; ready for end-to-end local test then deploy.
 - 2026-07-01 — **Phase 5 (admin frontend) done**: `socket.io-client` added;
   `frontend/src/services/supportSocket.js` (admin `/support` client);
   `pages/admin/ChatSupportPage.jsx` — WhatsApp-style **User / Supplier** tabs,
