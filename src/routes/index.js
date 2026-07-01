@@ -54,6 +54,10 @@ router.use('/experiences', require('./experience.routes'));
 router.use('/suppliers', require('./supplier.routes'));
 router.use('/contracts', require('./contract.routes'));
 
+// Customer support chat (user + supplier queues → admin). See
+// docs/CUSTOMER_SUPPORT_CHAT.md. Socket layer added in Phase 3.
+router.use('/support', require('./support.routes'));
+
 // Revenue analytics (admin dashboard).
 router.use('/admin/analytics', require('./analytics.routes'));
 

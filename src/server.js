@@ -5,6 +5,7 @@ const app = require('./app');
 const { sequelize, connectDB } = require('./config/database');
 require('./models'); // load models (incl. PWA via models/index.js)
 const { initSocket } = require('./pwa/services/socket');
+const { initSupportSocket } = require('./support/supportSocket');
 
 const PORT = process.env.PORT || 5000;
 
@@ -171,7 +172,8 @@ const start = async () => {
   //    APIs now respond in < 1s after the process starts; schema sync runs
   //    in the background.
   const httpServer = http.createServer(app);
-  initSocket(httpServer);
+  const io = initSocket(httpServer);
+  initSupportSocket(io); // /support namespace (customer support chat)
 
   httpServer.listen(PORT, () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);

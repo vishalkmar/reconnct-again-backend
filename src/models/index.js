@@ -53,6 +53,8 @@ const ExperienceType = require('./experienceType.model');
 const Experience = require('./experience.model');
 const Supplier = require('./supplier.model');
 const Contract = require('./contract.model');
+const SupportConversation = require('./supportConversation.model');
+const SupportMessage = require('./supportMessage.model');
 
 const db = {
   sequelize,
@@ -110,6 +112,8 @@ const db = {
   Experience,
   Supplier,
   Contract,
+  SupportConversation,
+  SupportMessage,
 };
 
 // ─── Users: self-reference for referrals ──────────────────────────────────
@@ -455,6 +459,14 @@ Supplier.hasMany(Experience, { foreignKey: 'supplierId', as: 'experiences', onDe
 // Contracts belong to a Supplier (one supplier → many contracts).
 Contract.belongsTo(Supplier, { foreignKey: 'supplierId', as: 'supplier' });
 Supplier.hasMany(Contract, { foreignKey: 'supplierId', as: 'contracts', onDelete: 'CASCADE' });
+
+// ─── Support chat ─────────────────────────────────────────────────────────
+// A conversation (per queue + party) holds many messages; it links to the User
+// (and optionally a Supplier account) it belongs to.
+SupportConversation.hasMany(SupportMessage, { foreignKey: 'conversationId', as: 'messages', onDelete: 'CASCADE' });
+SupportMessage.belongsTo(SupportConversation, { foreignKey: 'conversationId', as: 'conversation' });
+SupportConversation.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+SupportConversation.belongsTo(Supplier, { foreignKey: 'supplierId', as: 'supplier' });
 
 // PWA models register themselves with sequelize on require. We pull them in
 // here so a single `require('./models')` from app/server boots both worlds.

@@ -1,15 +1,18 @@
 const jwt = require('jsonwebtoken');
 const { User } = require('../models');
 
+const stripBearer = (v) => (String(v).startsWith('Bearer ') ? String(v).slice(7) : String(v));
+
 const extractToken = (req) => {
   // Prefer the dedicated user header so admin & user tokens never collide
-  // on a request that happens to carry both.
+  // on a request that happens to carry both (the website sends this).
   const userHeader = req.headers['x-user-auth'] || req.headers['X-User-Auth'];
-  if (userHeader) {
-    return String(userHeader).startsWith('Bearer ')
-      ? String(userHeader).slice(7)
-      : String(userHeader);
-  }
+  if (userHeader) return stripBearer(userHeader);
+  // Fallback: the mobile app sends the user token on the standard Authorization
+  // header. It's still verified as a `kind:'user'` token below, so an admin
+  // token here simply fails the kind check — no privilege crossover.
+  const authHeader = req.headers.authorization || req.headers.Authorization;
+  if (authHeader) return stripBearer(authHeader);
   return null;
 };
 
