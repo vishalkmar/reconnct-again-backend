@@ -69,7 +69,9 @@ const postBrevoEmail = (payload) =>
         family: 4,
         headers: {
           accept: 'application/json',
-          'api-key': process.env.BREVO_API_KEY,
+          // Strip any stray whitespace/newline a pasted env var may carry —
+          // otherwise Node throws "Invalid character in header content".
+          'api-key': String(process.env.BREVO_API_KEY || '').replace(/\s+/g, ''),
           'content-type': 'application/json',
           'content-length': Buffer.byteLength(body),
         },
