@@ -1,5 +1,6 @@
 const router = require('express').Router();
 const asyncHandler = require('express-async-handler');
+const jwt = require('jsonwebtoken');
 const ctrl = require('../controllers/support.controller');
 const { authenticate } = require('../middlewares/auth.middleware');
 const { authenticateUser } = require('../middlewares/userAuth.middleware');
@@ -7,10 +8,19 @@ const { buildUploader } = require('../middlewares/upload.middleware');
 const { getUploadedUrl } = require('../utils/uploads');
 const { ok, fail } = require('../utils/response');
 
-// Accept EITHER an admin (Authorization) or a party (X-User-Auth) token, so one
-// attachments endpoint serves both sides.
-const authenticateAny = (req, res, next) =>
-  (req.headers.authorization ? authenticate : authenticateUser)(req, res, next);
+// Accept an admin OR a party token on one endpoint. The mobile app sends the
+// USER token on the Authorization header, so we can't just switch on the header
+// name — decode the token and route by its `kind`.
+const authenticateAny = (req, res, next) => {
+  const raw = req.headers['x-user-auth'] || req.headers.authorization || '';
+  const token = String(raw).replace(/^Bearer\s+/i, '');
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    return (decoded.kind === 'user' ? authenticateUser : authenticate)(req, res, next);
+  } catch {
+    return authenticateUser(req, res, next); // 401s cleanly
+  }
+};
 
 // Images + PDF only for chat attachments.
 const attachmentUploader = buildUploader('support', {
@@ -26,9 +36,13 @@ router.post(
   asyncHandler(async (req, res) => {
     if (!req.file) return fail(res, 'No file uploaded', 400);
     const isPdf = req.file.mimetype === 'application/pdf' || /\.pdf$/i.test(req.file.originalname || '');
+    let url = getUploadedUrl(req.file);
+    // Serve PDFs as a download (correct filename, opens in the device viewer)
+    // instead of an inline render that the browser's PDF viewer chokes on.
+    if (isPdf && url.includes('/upload/')) url = url.replace('/upload/', '/upload/fl_attachment/');
     return ok(res, {
       type: isPdf ? 'pdf' : 'image',
-      url: getUploadedUrl(req.file),
+      url,
       name: req.file.originalname,
       size: req.file.size,
     }, 'Uploaded');
