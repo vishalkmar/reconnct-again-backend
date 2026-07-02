@@ -45,6 +45,8 @@ const convJSON = (c) => ({
   userId: c.userId,
   supplierId: c.supplierId,
   subjectLabel: c.subjectLabel,
+  subjectEmail: c.subjectEmail,
+  subjectPhone: c.subjectPhone,
   lastMessageText: c.lastMessageText,
   lastMessageAt: c.lastMessageAt,
   lastSenderRole: c.lastSenderRole,
@@ -56,11 +58,17 @@ const convJSON = (c) => ({
 
 const getOrCreateForUser = async (user, queue) => {
   const label = user.name || user.email || `User #${user.id}`;
+  const email = user.email || null;
+  const phone = user.phone || null;
   const [conv] = await SupportConversation.findOrCreate({
     where: { queue, userId: user.id },
-    defaults: { queue, userId: user.id, subjectLabel: label },
+    defaults: { queue, userId: user.id, subjectLabel: label, subjectEmail: email, subjectPhone: phone },
   });
-  if (conv.subjectLabel !== label) { conv.subjectLabel = label; await conv.save(); }
+  // Keep the denormalised contact details fresh (name/phone can change).
+  if (conv.subjectLabel !== label || conv.subjectEmail !== email || conv.subjectPhone !== phone) {
+    conv.subjectLabel = label; conv.subjectEmail = email; conv.subjectPhone = phone;
+    await conv.save();
+  }
   return conv;
 };
 

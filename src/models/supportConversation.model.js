@@ -13,6 +13,8 @@ const SupportConversation = sequelize.define(
     userId: { type: DataTypes.INTEGER, allowNull: true },
     supplierId: { type: DataTypes.INTEGER, allowNull: true },
     subjectLabel: { type: DataTypes.STRING, allowNull: true },
+    subjectEmail: { type: DataTypes.STRING, allowNull: true },
+    subjectPhone: { type: DataTypes.STRING, allowNull: true },
     lastMessageText: { type: DataTypes.STRING(500), allowNull: true },
     lastMessageAt: { type: DataTypes.DATE, allowNull: true },
     lastSenderRole: { type: DataTypes.ENUM('user', 'supplier', 'admin'), allowNull: true },
