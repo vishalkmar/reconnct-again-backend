@@ -27,6 +27,8 @@ const User = sequelize.define(
     },
     dob: { type: DataTypes.DATEONLY, allowNull: true },
     addressLine: { type: DataTypes.STRING(255), allowNull: true },
+    // Business / company name — used by the host ("Switch to Host") profile.
+    company: { type: DataTypes.STRING(180), allowNull: true },
     city: { type: DataTypes.STRING(120), allowNull: true },
     state: { type: DataTypes.STRING(120), allowNull: true },
     country: { type: DataTypes.STRING(120), allowNull: true },

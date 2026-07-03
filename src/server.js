@@ -121,6 +121,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migrateHostSchema } = require('./scripts/migrateHostSchema');
+    const result = await migrateHostSchema();
+    if (result.changes?.length) {
+      console.log(`[DB] Host schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Host schema migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migrateReviews } = require('./scripts/migrateReviews');
     const result = await migrateReviews();
     if (result.copied) {

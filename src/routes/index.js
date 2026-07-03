@@ -54,6 +54,10 @@ router.use('/experiences', require('./experience.routes'));
 router.use('/suppliers', require('./supplier.routes'));
 router.use('/contracts', require('./contract.routes'));
 
+// Host ("Switch to Host") — a signed-in user creates/manages their own
+// experience listings from the app or website. See host.controller.js.
+router.use('/host', require('./host.routes'));
+
 // Customer support chat (user + supplier queues → admin). See
 // docs/CUSTOMER_SUPPORT_CHAT.md. Socket layer added in Phase 3.
 router.use('/support', require('./support.routes'));

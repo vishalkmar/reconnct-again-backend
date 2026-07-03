@@ -24,6 +24,10 @@ const Experience = sequelize.define(
     typeId: { type: DataTypes.INTEGER, allowNull: true },
     // Optional owning supplier (admin "Suppliers" tab).
     supplierId: { type: DataTypes.INTEGER, allowNull: true },
+    // The host (a User) who created this listing via "Switch to Host" on the
+    // app / website. NULL for admin-authored experiences. Host-created rows are
+    // owned + editable by that user and start life as a draft / pending review.
+    ownerUserId: { type: DataTypes.INTEGER, allowNull: true },
     // Whether the supplier's info is shown publicly (website + app). Admin toggle.
     showSupplierPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 
@@ -90,6 +94,7 @@ const Experience = sequelize.define(
       { fields: ['typeId'] },
       { fields: ['status'] },
       { fields: ['isActive'] },
+      { fields: ['ownerUserId'] },
     ],
   }
 );
