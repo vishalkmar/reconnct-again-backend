@@ -44,6 +44,7 @@ const publicUser = (user) => {
     isProfileComplete: !!json.isProfileComplete,
     referralCode: json.referralCode,
     walletBalancePaise: json.walletBalancePaise || 0,
+    createdAt: json.createdAt,
   };
 };
 
