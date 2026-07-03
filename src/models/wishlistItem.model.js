@@ -7,7 +7,9 @@ const WishlistItem = sequelize.define(
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     userId: { type: DataTypes.INTEGER, allowNull: false },
     entityType: {
-      type: DataTypes.ENUM('package', 'room', 'event', 'addon'),
+      // MUST match wishlist.controller ALLOWED_TYPES. 'experience' was missing,
+      // so MySQL coerced it to '' on insert — experience saves silently failed.
+      type: DataTypes.ENUM('package', 'room', 'event', 'addon', 'experience'),
       allowNull: false,
       comment: 'Polymorphic — which bookable model does entityId reference',
     },

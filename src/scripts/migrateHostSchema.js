@@ -43,6 +43,30 @@ const migrate = async () => {
   await addColumnIfMissing('experiences', 'ownerUserId', 'INT NULL', summary);
   // Host business/company name on the user profile.
   await addColumnIfMissing('users', 'company', 'VARCHAR(180) NULL', summary);
+
+  // wishlist_items.entityType ENUM was missing 'experience', so MySQL coerced
+  // experience saves to '' (empty). Widen the ENUM, then delete the malformed
+  // empty-type rows so users can re-save experiences cleanly.
+  if (await tableExists('wishlist_items')) {
+    const col = await describeColumn('wishlist_items', 'entityType');
+    if (col && !/experience/i.test(col.Type || '')) {
+      try {
+        await sequelize.query(
+          "ALTER TABLE `wishlist_items` MODIFY COLUMN `entityType` ENUM('package','room','event','addon','experience') NOT NULL",
+        );
+        summary.changes.push('wishlist_items.entityType ENUM +experience');
+      } catch (err) {
+        summary.changes.push(`wishlist_items.entityType alter failed: ${err.message}`);
+      }
+    }
+    try {
+      const [res] = await sequelize.query("DELETE FROM `wishlist_items` WHERE `entityType` = '' OR `entityType` IS NULL");
+      const removed = res && (res.affectedRows != null ? res.affectedRows : 0);
+      if (removed) summary.changes.push(`wishlist_items pruned ${removed} malformed empty-type row(s)`);
+    } catch (err) {
+      summary.changes.push(`wishlist_items cleanup failed: ${err.message}`);
+    }
+  }
   return summary;
 };
 
