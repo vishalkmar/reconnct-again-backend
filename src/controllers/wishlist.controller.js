@@ -169,20 +169,15 @@ const list = asyncHandler(async (req, res) => {
   });
 
   const hydrated = [];
-  const orphanIds = [];
   for (const row of rows) {
     const entity = await hydrateEntity(row.entityType, row.entityId);
+    // Only render rows whose item still resolves. We deliberately do NOT delete
+    // the others: a transient hydrate miss (a temporarily-unpublished item, or
+    // an older build that didn't know a type) must never permanently destroy a
+    // user's saved item. Rows self-clean only when the item is truly gone.
     if (entity) {
       hydrated.push({ wishlistId: row.id, addedAt: row.createdAt, ...entity });
-    } else {
-      orphanIds.push(row.id);
     }
-  }
-
-  // Best-effort cleanup of wishlist rows pointing at deleted/inactive items so
-  // the list stays accurate over time. Failure here is non-fatal.
-  if (orphanIds.length) {
-    WishlistItem.destroy({ where: { id: orphanIds } }).catch(() => {});
   }
 
   return ok(res, {
