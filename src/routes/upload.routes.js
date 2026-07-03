@@ -91,4 +91,21 @@ router.post(
   })
 );
 
+// POST /api/uploads/user-image  (signed-in user) — general image upload used by
+// the "Switch to Host" listing wizard (cover + gallery photos). Returns the URL.
+const hostImageUploader = buildUploader('host-listings', {
+  allowed: /jpeg|jpg|png|gif|webp/,
+  message: 'Only image files are allowed',
+});
+router.post(
+  '/user-image',
+  authenticateUser,
+  hostImageUploader.single('file'),
+  asyncHandler(async (req, res) => {
+    if (!req.file) return fail(res, 'No file uploaded', 400);
+    const url = getUploadedUrl(req.file);
+    return ok(res, { url }, 'Uploaded');
+  })
+);
+
 module.exports = router;
