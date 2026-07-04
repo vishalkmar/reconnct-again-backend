@@ -2,9 +2,54 @@ const asyncHandler = require('express-async-handler');
 const slugify = require('slugify');
 const { Op } = require('sequelize');
 const {
-  Experience, ExperienceCategory, ExperienceType,
+  Experience, ExperienceCategory, ExperienceType, Booking,
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
+const { fromPaise } = require('../services/booking.service');
+
+// YYYY-MM-DD for the app/web listing-bookings cards (they sort/format on this).
+const toYMD = (d) => {
+  if (!d) return null;
+  const dt = new Date(d);
+  if (Number.isNaN(dt.getTime())) return null;
+  return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
+};
+
+// Booking status → the host card's upcoming | completed | cancelled buckets.
+const hostBookingStatus = (b) => {
+  if (b.status === 'cancelled' || b.status === 'refunded') return 'cancelled';
+  const endIso = b.scheduledEndAt || b.scheduledFor;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const past = endIso ? new Date(endIso) < today : false;
+  if (b.status === 'completed' || (b.status === 'confirmed' && past)) return 'completed';
+  return 'upcoming';
+};
+
+// Real bookings for one of the host's experiences (listings). Only rows that
+// actually reached payment (or were cancelled) — pending_payment carts are
+// noise. Shaped for the ListingBookings card on both app and web.
+const bookingsForExperience = async (experienceId) => {
+  const rows = await Booking.findAll({
+    where: {
+      itemType: 'experience',
+      itemId: experienceId,
+      status: { [Op.in]: ['confirmed', 'completed', 'cancelled', 'refunded'] },
+    },
+    order: [['scheduledFor', 'DESC'], ['createdAt', 'DESC']],
+  });
+  return rows.map((r) => {
+    const j = r.toJSON ? r.toJSON() : r;
+    return {
+      id: j.id,
+      bookingCode: j.bookingCode,
+      guest: j.guestName || 'Guest',
+      guests: j.guestCount || 1,
+      date: toYMD(j.scheduledFor) || toYMD(j.createdAt) || '1970-01-01',
+      amount: fromPaise(j.totalPaise || 0),
+      status: hostBookingStatus(j),
+    };
+  });
+};
 
 /*
   Host ("Switch to Host") API. A host listing IS an Experience whose
@@ -159,7 +204,9 @@ const getMine = asyncHandler(async (req, res) => {
     include: [CATEGORY, TYPE],
   });
   if (!row) return fail(res, 'Listing not found', 404);
-  return ok(res, { listing: toHostListing(row), form: toHostForm(row) });
+  const listing = toHostListing(row);
+  listing.bookings = await bookingsForExperience(row.id);
+  return ok(res, { listing, form: toHostForm(row) });
 });
 
 // POST /api/host/listings  { form, submit? } — create a draft (or submit for review).
