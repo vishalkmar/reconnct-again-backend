@@ -54,15 +54,57 @@ const clientIp = (req) => {
   return fwd || req.ip || '';
 };
 
-// GET /api/public/geo/locate
+// Ask the configured LLM (NVIDIA NIM / OpenAI-compatible) to pick the clean city
+// name a person would actually say they're in, out of a messy reverse-geocoded
+// address (e.g. "Dwarka Sector 21, New Delhi, Delhi 110075" → "New Delhi").
+// Best-effort — returns null if the LLM isn't configured or the reply is odd.
+const resolveCityWithLLM = async ({ fullAddress, city, region, country }) => {
+  const base = process.env.LLM_BASE_URL;
+  const key = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL;
+  if (!base || !key || !model) return null;
+  const ctx = fullAddress || [city, region, country].filter(Boolean).join(', ');
+  if (!ctx) return null;
+  const prompt = 'From this address, reply with ONLY the city (or nearest well-known city/town) '
+    + 'a person would say they live in. No state, no country, no punctuation, no extra words.\n'
+    + `Address: "${ctx}"`;
+  const j = await safeFetch(`${base.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0, max_tokens: 20 }),
+  }, 8000);
+  const text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+  if (!text) return null;
+  const c = String(text).trim().replace(/^["'\s]+|["'.\s]+$/g, '').split('\n')[0].trim();
+  return c && c.length <= 40 ? c : null;
+};
+
+// GET /api/public/geo/locate — resolve the user's full location + city.
+// With lat/lon we reverse-geocode down to the street/area (gali/mohalla) and let
+// the LLM name the city; without coords we fall back to an IP lookup.
 const locate = asyncHandler(async (req, res) => {
   let { lat, lon } = req.query;
   let city = null; let region = null; let country = null;
+  let area = null; let postcode = null; let fullAddress = null;
 
   if (lat && lon) {
-    // Free reverse geocode (no key).
+    // 1) bigdatacloud — reliable city/region/country (no key).
     const j = await safeFetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=en`);
-    if (j) { city = j.city || j.locality; region = j.principalSubdivision; country = j.countryName; }
+    if (j) { city = j.city || j.locality; region = j.principalSubdivision; country = j.countryName; area = j.locality || null; postcode = j.postcode || null; }
+    // 2) Nominatim — detailed street / area (gali / mohalla) for the full address.
+    const nom = await safeFetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&zoom=18&addressdetails=1`,
+      { headers: { 'User-Agent': 'reconnct-app/1.0 (support@reconnct.app)' } },
+    );
+    if (nom) {
+      fullAddress = nom.display_name || fullAddress;
+      const a = nom.address || {};
+      area = a.neighbourhood || a.suburb || a.village || a.town || a.hamlet || area;
+      city = a.city || a.town || a.municipality || city;
+      region = a.state || region;
+      country = a.country || country;
+      postcode = a.postcode || postcode;
+    }
   } else {
     const ip = clientIp(req);
     const j = await safeFetch(`http://ip-api.com/json/${ip}?fields=status,city,regionName,country,lat,lon`);
@@ -71,10 +113,17 @@ const locate = asyncHandler(async (req, res) => {
     }
   }
 
+  // LLM cleans up the city name from the full address.
+  const smartCity = await resolveCityWithLLM({ fullAddress, city, region, country });
+  if (smartCity) city = smartCity;
+
   return ok(res, {
     city: city || null,
     region: region || null,
     country: country || null,
+    area: area || null,
+    postcode: postcode || null,
+    fullAddress: fullAddress || [area, city, region, country].filter(Boolean).join(', ') || null,
     lat: lat != null ? Number(lat) : null,
     lon: lon != null ? Number(lon) : null,
   });

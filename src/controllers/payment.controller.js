@@ -108,6 +108,17 @@ const createLinkForBooking = asyncHandler(async (req, res) => {
   const customer = { name: booking.guestName, email: booking.guestEmail, phone: booking.guestPhone };
   const returnUrl = `${clientUrl()}/booking-success/${booking.bookingCode}`;
 
+  // App-created (direct) link: the app made the Cashfree link itself and just
+  // wants us to remember its id so link-status polling can confirm the booking.
+  // No Cashfree call from here — this is the reliable on-device phase-1 path.
+  const providedLinkId = req.body && req.body.linkId ? String(req.body.linkId) : null;
+  const providedLinkUrl = req.body && req.body.linkUrl ? String(req.body.linkUrl) : null;
+  if (providedLinkId) {
+    booking.paymentOrderId = providedLinkId;
+    await booking.save();
+    return ok(res, { linkUrl: providedLinkUrl, bookingCode: booking.bookingCode }, 'Payment link registered');
+  }
+
   try {
     // Reuse an existing link for this booking if one was already created.
     let linkId = booking.paymentOrderId;
