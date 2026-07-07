@@ -13,6 +13,7 @@ router.use('/payments', require('./payment.routes'));
 router.use('/refer-earn', require('./referEarn.routes'));
 router.use('/admin/bookings', require('./adminBooking.routes'));
 router.use('/admin/users', require('./adminUser.routes'));
+router.use('/admin/notifications', require('./adminNotification.routes'));
 router.use('/admin', require('./adminConfig.routes'));
 router.use('/heroes', require('./hero.routes'));
 router.use('/header-links', require('./headerLink.routes'));
