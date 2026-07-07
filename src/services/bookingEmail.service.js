@@ -233,4 +233,76 @@ const notifyHostOfBooking = async ({ booking }) => {
   return send({ to: host.email, subject, html, text, attachments });
 };
 
-module.exports = { sendBookingConfirmation, notifyHostOfBooking, buildVoucherHtml };
+// Shared little reminder card (guest or host wording swapped by the caller).
+const buildReminderHtml = ({ heading, lead, itemName, itemImage, itemLocation, scheduleLine, extraRows = [] }) => `
+  <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
+    <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+      <div style="background:#F9B402;padding:22px 28px;color:#101010;">
+        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.8;">${escape(heading)}</div>
+        <div style="font-weight:800;font-size:18px;margin-top:4px;">${escape(itemName)}</div>
+      </div>
+      <div style="padding:22px 28px;">
+        <p style="color:#374151;line-height:1.6;margin:0 0 14px;">${lead}</p>
+        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-size:14px;">
+          <tr><td style="padding:6px 0;color:#6b7280;width:36%;">When</td><td style="padding:6px 0;font-weight:700;color:#0f172a;">${scheduleLine}</td></tr>
+          ${itemLocation ? `<tr><td style="padding:6px 0;color:#6b7280;">Location</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${escape(itemLocation)}</td></tr>` : ''}
+          ${extraRows.map(([k, v]) => `<tr><td style="padding:6px 0;color:#6b7280;">${escape(k)}</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${v}</td></tr>`).join('')}
+        </table>
+      </div>
+      ${itemImage ? `<img src="${escape(itemImage)}" alt="" style="width:100%;max-height:180px;object-fit:cover;" />` : ''}
+    </div>
+  </div>
+`;
+
+const scheduleLineFor = (booking) => {
+  const timeMatch = String(booking.specialRequests || '').match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+  const time = timeMatch ? ` at ${timeMatch[1]}` : '';
+  return `${fmtDate(booking.scheduledFor)}${time}`;
+};
+
+/**
+ * "Starting soon" reminder to the GUEST — fired twice per confirmed booking
+ * (12h before, then 2h before) by the reminder sweep in reminder.service.js.
+ */
+const sendGuestReminder = async ({ booking, hoursBefore }) => {
+  if (!booking?.guestEmail) return;
+  const item = booking.itemSnapshot || {};
+  const subject = `Reminder: ${item.name || 'your experience'} in ${hoursBefore} hours`;
+  const html = buildReminderHtml({
+    heading: `Starting in ${hoursBefore} hours`,
+    lead: `Just a heads-up — <strong>${escape(item.name || 'your experience')}</strong> is coming up. Booking code <strong>${escape(booking.bookingCode)}</strong>.`,
+    itemName: item.name || 'Your experience',
+    itemImage: item.image,
+    itemLocation: item.location,
+    scheduleLine: scheduleLineFor(booking),
+    extraRows: [['Guests', String(booking.guestCount || 1)]],
+  });
+  const text = `Reminder: ${item.name || 'your experience'} starts in ${hoursBefore} hours (${scheduleLineFor(booking)}). Booking ${booking.bookingCode}.`;
+  return send({ to: booking.guestEmail, subject, html, text });
+};
+
+/**
+ * Same reminder for the HOST — "your listing has a guest coming up".
+ */
+const sendHostReminder = async ({ booking, exp, host, hoursBefore }) => {
+  if (!host?.email) return;
+  const subject = `Reminder: ${exp.name} in ${hoursBefore} hours — guest ${booking.guestName || 'Guest'}`;
+  const html = buildReminderHtml({
+    heading: `Booking in ${hoursBefore} hours`,
+    lead: `<strong>${escape(exp.name)}</strong> has a guest coming up in ${hoursBefore} hours.`,
+    itemName: exp.name,
+    itemImage: exp.mainImage,
+    itemLocation: exp.city || exp.location,
+    scheduleLine: scheduleLineFor(booking),
+    extraRows: [
+      ['Guest', escape(booking.guestName || 'Guest')],
+      ['Guests', String(booking.guestCount || 1)],
+    ],
+  });
+  const text = `Reminder: ${exp.name} has a guest (${booking.guestName || 'Guest'}) in ${hoursBefore} hours (${scheduleLineFor(booking)}).`;
+  return send({ to: host.email, subject, html, text });
+};
+
+module.exports = {
+  sendBookingConfirmation, notifyHostOfBooking, buildVoucherHtml, sendGuestReminder, sendHostReminder,
+};

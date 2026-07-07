@@ -419,6 +419,30 @@ const resolveSchedule = ({ item, scheduledFor, scheduledEndAt }) => {
   };
 };
 
+// IST is UTC+5:30 — every "Preferred time" the app collects is a local Indian
+// wall-clock time, but scheduledFor is a bare DATEONLY with no timezone of its
+// own, so we resolve the two into one real, comparable instant (UTC) here.
+// Used to schedule the 12h/2h-before reminder sweep.
+const IST_OFFSET_MIN = 5 * 60 + 30;
+
+const parseTimeOfDay = (text) => {
+  const m = String(text || '').match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) return { hh: 10, mm: 0 }; // no time given — default 10:00 AM IST
+  let hh = parseInt(m[1], 10) % 12;
+  if (/PM/i.test(m[3])) hh += 12;
+  return { hh, mm: parseInt(m[2], 10) || 0 };
+};
+
+// scheduledForYMD: 'YYYY-MM-DD' (DATEONLY). specialRequests: free text that
+// may contain "Preferred time: 04:00 PM" (the only place a time exists today).
+const resolveScheduledAt = (scheduledForYMD, specialRequests) => {
+  if (!scheduledForYMD) return null;
+  const [y, mo, d] = String(scheduledForYMD).slice(0, 10).split('-').map(Number);
+  if (!y || !mo || !d) return null;
+  const { hh, mm } = parseTimeOfDay(specialRequests);
+  return new Date(Date.UTC(y, mo - 1, d, hh, mm) - IST_OFFSET_MIN * 60000);
+};
+
 module.exports = {
   ALLOWED_TYPES,
   TAX_RATE,
@@ -426,6 +450,7 @@ module.exports = {
   computePricing,
   buildItemSnapshot,
   resolveSchedule,
+  resolveScheduledAt,
   generateBookingCode,
   toPaise,
   fromPaise,

@@ -7,6 +7,7 @@ const {
   computePricing,
   buildItemSnapshot,
   resolveSchedule,
+  resolveScheduledAt,
   generateBookingCode,
   fromPaise,
 } = require('../services/booking.service');
@@ -306,6 +307,7 @@ const create = asyncHandler(async (req, res) => {
     itemSnapshot: { ...buildItemSnapshot(item), extraPersons },
     scheduledFor: schedule.scheduledFor,
     scheduledEndAt: schedule.scheduledEndAt,
+    scheduledAt: resolveScheduledAt(schedule.scheduledFor, specialRequests),
     units: schedule.units,
     guestName,
     guestEmail,

@@ -31,6 +31,15 @@ const Booking = sequelize.define(
     // Only set for multi-day items (rooms with check-out, packages spanning
     // a range). Single-day add-ons / events leave this null.
     scheduledEndAt: { type: DataTypes.DATEONLY, allowNull: true },
+    // Real, comparable instant (UTC) the experience starts — resolved from
+    // scheduledFor (date-only) + any "Preferred time" the guest gave. Powers
+    // the 12h/2h-before reminder sweep; scheduledFor/scheduledEndAt above stay
+    // date-only for everything else (display, cancellation windows, etc).
+    scheduledAt: { type: DataTypes.DATE, allowNull: true },
+    // Set the moment each reminder wave actually goes out — makes the sweep
+    // idempotent (never double-sends) no matter how often it runs.
+    reminder12hSentAt: { type: DataTypes.DATE, allowNull: true },
+    reminder2hSentAt: { type: DataTypes.DATE, allowNull: true },
     // Convenience: nights = end - start for rooms; days for packages.
     units: {
       type: DataTypes.INTEGER,
@@ -123,6 +132,7 @@ const Booking = sequelize.define(
       { fields: ['status'] },
       { fields: ['paymentOrderId'] },
       { fields: ['scheduledFor'] },
+      { fields: ['scheduledAt'] },
     ],
   }
 );

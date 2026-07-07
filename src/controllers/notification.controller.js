@@ -28,10 +28,14 @@ const list = asyncHandler(async (req, res) => {
   ]);
 
   const feed = [];
-  // scheduledFor is DATE-ONLY (no time of day stored anywhere reliable), so
-  // the closest honest "reminder" we can derive is "this is happening today"
-  // — not a precise N-hours-before alert, which the data can't support yet.
-  const todayYMD = new Date().toISOString().slice(0, 10);
+  // Same 12h/2h windows the email reminder sweep uses (reminder.service.js),
+  // computed off the real scheduledAt instant now that one exists.
+  const now = Date.now();
+  const withinHours = (scheduledAt, hours) => {
+    if (!scheduledAt) return false;
+    const diffMs = new Date(scheduledAt).getTime() - now;
+    return diffMs > 0 && diffMs <= hours * 60 * 60 * 1000;
+  };
 
   // "Switch to Hosting" side: bookings made on any experience this user owns.
   // Same feed endpoint for both traveller and host notifications, so opening
@@ -61,12 +65,13 @@ const list = asyncHandler(async (req, res) => {
         amount: j.subtotalPaise ? fromPaise(j.subtotalPaise) : null,
         at: j.paidAt || j.createdAt,
       });
-      if (j.status === 'confirmed' && j.scheduledFor === todayYMD) {
+      if (j.status === 'confirmed' && withinHours(j.scheduledAt, 12)) {
+        const soon = withinHours(j.scheduledAt, 2);
         feed.push({
           id: `hr${j.id}`,
           kind: 'reminder',
-          title: 'Booking today',
-          body: `${listingName} has a guest today — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
+          title: soon ? 'Booking in 2 hours' : 'Booking in 12 hours',
+          body: `${listingName} — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
           at: new Date().toISOString(),
         });
       }
@@ -88,12 +93,13 @@ const list = asyncHandler(async (req, res) => {
       amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
       at: j.createdAt || j.scheduledFor,
     });
-    if (j.status === 'confirmed' && j.scheduledFor === todayYMD) {
+    if (j.status === 'confirmed' && withinHours(j.scheduledAt, 12)) {
+      const soon = withinHours(j.scheduledAt, 2);
       feed.push({
         id: `r${j.id}`,
         kind: 'reminder',
-        title: 'Happening today',
-        body: `${title} is today — don't forget!`,
+        title: soon ? 'Starting in 2 hours' : 'Starting in 12 hours',
+        body: `${title} — don't forget!`,
         at: new Date().toISOString(),
       });
     }

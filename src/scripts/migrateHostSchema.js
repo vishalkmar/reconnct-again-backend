@@ -73,6 +73,38 @@ const migrate = async () => {
     }
   }
 
+  // 12h/2h-before booking reminders need a real comparable instant, not the
+  // date-only scheduledFor.
+  await addColumnIfMissing('bookings', 'scheduledAt', 'DATETIME NULL', summary);
+  await addColumnIfMissing('bookings', 'reminder12hSentAt', 'DATETIME NULL', summary);
+  await addColumnIfMissing('bookings', 'reminder2hSentAt', 'DATETIME NULL', summary);
+
+  // Backfill scheduledAt for existing confirmed bookings that predate the
+  // column, so the reminder sweep can pick them up too (harmless no-op for
+  // ones already in the past).
+  if (await tableExists('bookings')) {
+    try {
+      const { Booking } = require('../models');
+      const { resolveScheduledAt } = require('../services/booking.service');
+      const rows = await Booking.findAll({
+        where: { status: 'confirmed', scheduledAt: null },
+        attributes: ['id', 'scheduledFor', 'specialRequests'],
+      });
+      let filled = 0;
+      for (const row of rows) {
+        const at = resolveScheduledAt(row.scheduledFor, row.specialRequests);
+        if (at) {
+          // eslint-disable-next-line no-await-in-loop
+          await row.update({ scheduledAt: at });
+          filled += 1;
+        }
+      }
+      if (filled) summary.changes.push(`bookings backfilled scheduledAt for ${filled} row(s)`);
+    } catch (err) {
+      summary.changes.push(`bookings scheduledAt backfill failed: ${err.message}`);
+    }
+  }
+
   // wishlist_items.entityType ENUM was missing 'experience', so MySQL coerced
   // experience saves to '' (empty). Widen the ENUM, then delete the malformed
   // empty-type rows so users can re-save experiences cleanly.
