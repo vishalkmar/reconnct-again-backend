@@ -1,7 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const {
-  Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier,
+  Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier, User,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { coordsForCity, haversineKm } = require('./geo.controller');
@@ -124,11 +124,22 @@ const detailShape = async (exp) => {
     childBands: childBands(j),
     schedule: j.schedule || {},
     reviews: Array.isArray(j.data && j.data.reviews) ? j.data.reviews : [],
-    // Supplier shown publicly only when the admin toggle allows it.
-    supplier: (j.showSupplierPublic !== false && j.supplier)
-      ? { id: j.supplier.id, name: j.supplier.supplierName || j.supplier.companyName, image: j.supplier.image }
-      : null,
+    // "Hosted by" prefers the real host account (ownerUserId — a "Switch to
+    // Host" User) over the admin-assigned Supplier label, since the host is
+    // who actually gets the booking email/notification for this listing.
+    // Falls back to the Supplier badge when there's no host attached yet.
+    supplier: await hostBadge(j),
   };
+};
+
+const hostBadge = async (j) => {
+  if (j.ownerUserId) {
+    const owner = await User.findByPk(j.ownerUserId, { attributes: ['id', 'name', 'company', 'avatarUrl'] });
+    if (owner) return { id: owner.id, name: owner.company || owner.name || 'Host', image: owner.avatarUrl || null, verified: true };
+  }
+  return (j.showSupplierPublic !== false && j.supplier)
+    ? { id: j.supplier.id, name: j.supplier.supplierName || j.supplier.companyName, image: j.supplier.image }
+    : null;
 };
 
 // GET /api/public/experiences
