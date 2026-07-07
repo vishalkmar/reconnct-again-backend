@@ -45,7 +45,10 @@ const bookingsForExperience = async (experienceId) => {
       guest: j.guestName || 'Guest',
       guests: j.guestCount || 1,
       date: toYMD(j.scheduledFor) || toYMD(j.createdAt) || '1970-01-01',
-      amount: fromPaise(j.totalPaise || 0),
+      // Base amount (subtotal) — the host's payout basis. GST + platform
+      // convenience fee are never the host's money, so never show the
+      // guest's full total here (must match the voucher email exactly).
+      amount: fromPaise(j.subtotalPaise || 0),
       status: hostBookingStatus(j),
     };
   });
@@ -60,6 +63,8 @@ const getBooking = asyncHandler(async (req, res) => {
   if (!exp) return fail(res, 'Booking not found', 404);
 
   const j = booking.toJSON();
+  const expJ = exp.toJSON ? exp.toJSON() : exp;
+  const pricing = expJ.pricing || {};
   return ok(res, {
     booking: {
       id: j.id,
@@ -77,7 +82,20 @@ const getBooking = asyncHandler(async (req, res) => {
       paymentMethod: j.paymentMethod,
       paidAt: j.paidAt,
       createdAt: j.createdAt,
-      item: { id: exp.id, name: exp.name, image: exp.mainImage, city: exp.city, location: exp.location },
+      // Full itinerary context — same info the guest sees on the detail
+      // page — so the host can see exactly what they're hosting, not just
+      // who booked and how much.
+      item: {
+        id: expJ.id,
+        name: expJ.name,
+        image: expJ.mainImage,
+        city: expJ.city,
+        location: expJ.location,
+        about: expJ.about,
+        durationLabel: pricing.durationLabel || (expJ.data && expJ.data.durationLabel) || null,
+        inclusions: Array.isArray(expJ.inclusions) ? expJ.inclusions : [],
+        faqs: Array.isArray(expJ.faqs) ? expJ.faqs : [],
+      },
     },
   });
 });
@@ -312,7 +330,8 @@ const summary = asyncHandler(async (req, res) => {
     const j = b.toJSON();
     if (!['confirmed', 'completed'].includes(j.status)) continue;
     bookingsCount += 1;
-    const amt = fromPaise(j.totalPaise || 0);
+    // Base amount only — GST/convenience fee are never the host's earnings.
+    const amt = fromPaise(j.subtotalPaise || 0);
     earnedTotal += amt;
     if (j.paidAt && new Date(j.paidAt) >= monthStart) earnedMonth += amt;
   }
@@ -328,7 +347,7 @@ const summary = asyncHandler(async (req, res) => {
       guest: j.guestName || 'Guest',
       experience: nameById.get(j.itemId) || 'Experience',
       date: toYMD(j.scheduledFor) || toYMD(j.createdAt) || '1970-01-01',
-      amount: fromPaise(j.totalPaise || 0),
+      amount: fromPaise(j.subtotalPaise || 0),
       status: hostBookingStatus(j),
     };
   });
@@ -349,4 +368,42 @@ const summary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listMine, getMine, createMine, updateMine, removeMine, summary, getBooking };
+// GET /api/host/transactions — every real paid booking across all my
+// listings, base amount only (never GST/convenience fee — matches the
+// voucher email and the dashboard stats exactly). No pending/dummy rows —
+// a booking only ever reaches this list once it's actually been paid.
+const listTransactions = asyncHandler(async (req, res) => {
+  const rows = await Experience.findAll({ where: { ownerUserId: req.user.id }, attributes: ['id', 'name'] });
+  const expIds = rows.map((r) => r.id);
+  const nameById = new Map(rows.map((r) => [r.id, r.name]));
+  const bookingRows = expIds.length
+    ? await Booking.findAll({
+        where: {
+          itemType: 'experience',
+          itemId: { [Op.in]: expIds },
+          status: { [Op.in]: ['confirmed', 'completed'] },
+        },
+        order: [['paidAt', 'DESC'], ['createdAt', 'DESC']],
+      })
+    : [];
+
+  const transactions = bookingRows.map((b) => {
+    const j = b.toJSON();
+    return {
+      id: j.id,
+      bookingCode: j.bookingCode,
+      guest: j.guestName || 'Guest',
+      listingId: j.itemId,
+      listingTitle: nameById.get(j.itemId) || 'Experience',
+      date: toYMD(j.paidAt) || toYMD(j.createdAt) || '1970-01-01',
+      amount: fromPaise(j.subtotalPaise || 0),
+      type: 'completed',
+    };
+  });
+
+  return ok(res, { transactions });
+});
+
+module.exports = {
+  listMine, getMine, createMine, updateMine, removeMine, summary, getBooking, listTransactions,
+};

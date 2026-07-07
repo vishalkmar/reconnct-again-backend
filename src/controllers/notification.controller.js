@@ -53,9 +53,12 @@ const list = asyncHandler(async (req, res) => {
       feed.push({
         id: `h${j.id}`,
         kind: 'host_booking',
+        bookingId: j.id,
         title: 'New booking on your listing',
         body: `${listingName} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
-        amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
+        // Base amount — matches the voucher email; never the guest's full
+        // total (that includes GST/convenience fee, not the host's money).
+        amount: j.subtotalPaise ? fromPaise(j.subtotalPaise) : null,
         at: j.paidAt || j.createdAt,
       });
       if (j.status === 'confirmed' && j.scheduledFor === todayYMD) {
