@@ -379,6 +379,22 @@ const getMineByCode = asyncHandler(async (req, res) => {
   return ok(res, { booking: publicBooking(booking) });
 });
 
+// GET /api/bookings/me/:code/voucher.pdf — the same voucher attached to the
+// confirmation email, downloadable on-demand from the app's booking detail
+// screen (opened via Linking.openURL, hence the `?token=` middleware fallback).
+const voucherPdf = asyncHandler(async (req, res) => {
+  const { buildBookingVoucherPdf } = require('../services/bookingVoucherPdf.service');
+  const booking = await Booking.findOne({
+    where: { bookingCode: String(req.params.code), userId: req.user.id },
+  });
+  if (!booking) return fail(res, 'Booking not found', 404);
+
+  const pdf = await buildBookingVoucherPdf(booking);
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="voucher-${booking.bookingCode}.pdf"`);
+  return res.send(pdf);
+});
+
 // Predefined cancellation reasons — kept in code (not config) so the user
 // always sees the same options regardless of admin tinkering. The "other"
 // option triggers the custom-reason text input in the UI.
@@ -499,6 +515,7 @@ module.exports = {
   create,
   listMine,
   getMineByCode,
+  voucherPdf,
   cancelMine,
   cancelQuote,
   CANCEL_REASONS,

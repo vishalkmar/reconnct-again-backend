@@ -250,23 +250,70 @@ const removeMine = asyncHandler(async (req, res) => {
 
 // GET /api/host/summary — dashboard stats (real, derived from the host's data).
 const summary = asyncHandler(async (req, res) => {
-  const rows = await Experience.findAll({ where: { ownerUserId: req.user.id }, attributes: ['id', 'status', 'isActive', 'data'] });
+  const rows = await Experience.findAll({
+    where: { ownerUserId: req.user.id },
+    attributes: ['id', 'name', 'status', 'isActive', 'data', 'rating'],
+  });
   const listingCount = rows.length;
   const activeCount = rows.filter((r) => r.status === 'published' && r.isActive).length;
   const pendingCount = rows.filter((r) => (r.data && r.data.hostStatus) === 'pending').length;
   const draftCount = rows.filter((r) => ((r.data && r.data.hostStatus) || 'draft') === 'draft').length;
+
+  const expIds = rows.map((r) => r.id);
+  const nameById = new Map(rows.map((r) => [r.id, r.name]));
+  const bookingRows = expIds.length
+    ? await Booking.findAll({
+        where: {
+          itemType: 'experience',
+          itemId: { [Op.in]: expIds },
+          status: { [Op.in]: ['confirmed', 'completed', 'cancelled', 'refunded'] },
+        },
+        order: [['createdAt', 'DESC']],
+      })
+    : [];
+
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  let earnedTotal = 0;
+  let earnedMonth = 0;
+  let bookingsCount = 0;
+  for (const b of bookingRows) {
+    const j = b.toJSON();
+    if (!['confirmed', 'completed'].includes(j.status)) continue;
+    bookingsCount += 1;
+    const amt = fromPaise(j.totalPaise || 0);
+    earnedTotal += amt;
+    if (j.paidAt && new Date(j.paidAt) >= monthStart) earnedMonth += amt;
+  }
+
+  const ratings = rows.map((r) => Number(r.rating) || 0).filter((n) => n > 0);
+  const rating = ratings.length ? Math.round((ratings.reduce((s, n) => s + n, 0) / ratings.length) * 10) / 10 : 0;
+
+  // Real "Recent Bookings" feed for the dashboard — was hardcoded demo rows.
+  const recentBookings = bookingRows.slice(0, 6).map((b) => {
+    const j = b.toJSON();
+    return {
+      id: j.id,
+      guest: j.guestName || 'Guest',
+      experience: nameById.get(j.itemId) || 'Experience',
+      date: toYMD(j.scheduledFor) || toYMD(j.createdAt) || '1970-01-01',
+      amount: fromPaise(j.totalPaise || 0),
+      status: hostBookingStatus(j),
+    };
+  });
+
   return ok(res, {
     stats: {
       listingCount,
       activeCount,
       pendingCount,
       draftCount,
-      // Real bookings/earnings feed is a later phase — honest zeros for now.
-      bookings: 0,
-      earnedTotal: 0,
-      earnedMonth: 0,
+      bookings: bookingsCount,
+      earnedTotal,
+      earnedMonth,
       pendingTotal: 0,
-      rating: 0,
+      rating,
+      recentBookings,
     },
   });
 });

@@ -13,7 +13,7 @@ const {
   verifyWebhookSignature,
   resolveMode,
 } = require('../services/cashfree.service');
-const { sendBookingConfirmation } = require('../services/bookingEmail.service');
+const { sendBookingConfirmation, notifyHostOfBooking } = require('../services/bookingEmail.service');
 const { creditReferrerForFirstPaid } = require('../services/referEarn.service');
 const { publicBooking } = require('./booking.controller');
 
@@ -60,6 +60,10 @@ const confirmBookingFromCashfree = async (booking, cfOrder) => {
   sendBookingConfirmation({ booking })
     .catch((err) => console.error('[payment] booking confirmation email failed:', err.message));
 
+  // Tell the host (if this experience has one) that their listing was booked.
+  notifyHostOfBooking({ booking })
+    .catch((err) => console.error('[payment] host notification email failed:', err.message));
+
   // Pay the referrer their wallet credit if this is the referee's FIRST paid
   // booking. The service handles idempotency and the "is this the first?"
   // check, so we don't have to worry about firing this multiple times.
@@ -86,6 +90,8 @@ const confirmBookingFromLink = async (booking, link) => {
   // a successful payment look failed.
   sendBookingConfirmation({ booking })
     .catch((err) => console.error('[payment] booking confirmation email failed:', err.message));
+  notifyHostOfBooking({ booking })
+    .catch((err) => console.error('[payment] host notification email failed:', err.message));
   creditReferrerForFirstPaid({ booking })
     .catch((err) => console.error('[payment] referrer payout failed:', err.message));
 

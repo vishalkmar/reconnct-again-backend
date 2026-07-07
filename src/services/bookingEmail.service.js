@@ -1,5 +1,6 @@
 const { send } = require('../pwa/services/mailer');
 const { fromPaise } = require('./booking.service');
+const { buildBookingVoucherPdf } = require('./bookingVoucherPdf.service');
 
 const escape = (val) =>
   String(val ?? '').replace(/[&<>"']/g, (ch) =>
@@ -125,7 +126,62 @@ const sendBookingConfirmation = async ({ booking }) => {
     `Total paid: ${fmtMoney(booking.totalPaise, booking.currency)}`,
   ].filter(Boolean).join('\n');
 
-  return send({ to: booking.guestEmail, subject, html, text });
+  // PDF voucher attachment — best-effort. A PDF layout bug should never stop
+  // the confirmation email itself from going out.
+  let attachments;
+  try {
+    const pdf = await buildBookingVoucherPdf(booking);
+    attachments = [{ filename: `voucher-${booking.bookingCode}.pdf`, content: pdf }];
+  } catch (err) {
+    console.error('[bookingEmail] voucher PDF generation failed:', err.message);
+  }
+
+  return send({ to: booking.guestEmail, subject, html, text, attachments });
 };
 
-module.exports = { sendBookingConfirmation, buildVoucherHtml };
+/**
+ * Tell the HOST (the User who owns the Experience via ownerUserId) that one
+ * of their listings just got booked. No-op for admin-authored experiences
+ * (ownerUserId null) or non-experience bookings (rooms/packages/events don't
+ * have a host account yet). Fire-and-forget, same as sendBookingConfirmation.
+ */
+const notifyHostOfBooking = async ({ booking }) => {
+  if (!booking || booking.itemType !== 'experience') return;
+  const { Experience, User } = require('../models');
+  const exp = await Experience.findByPk(booking.itemId);
+  if (!exp || !exp.ownerUserId) return;
+  const host = await User.findByPk(exp.ownerUserId);
+  if (!host || !host.email) return;
+
+  const subject = `New booking on ${exp.name} — ${booking.bookingCode}`;
+  const html = `
+    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
+      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+        <div style="background:#F9B402;padding:24px 28px;color:#101010;">
+          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.85;">New booking</div>
+          <div style="font-weight:800;font-size:20px;margin-top:4px;">${exp.name}</div>
+        </div>
+        <div style="padding:22px 28px;">
+          <p style="color:#374151;line-height:1.6;margin:0 0 14px;">
+            Someone just booked <strong>${exp.name}</strong>. Here are the details:
+          </p>
+          <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-size:14px;">
+            <tr><td style="padding:6px 0;color:#6b7280;width:40%;">Booking code</td><td style="padding:6px 0;font-weight:700;color:#0f172a;">${booking.bookingCode}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;">Guest</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${booking.guestName || 'Guest'}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;">Guests</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${booking.guestCount || 1}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${fmtDate(booking.scheduledFor)}</td></tr>
+            <tr><td style="padding:6px 0;color:#6b7280;">Amount</td><td style="padding:6px 0;font-weight:800;color:#0f766e;">${fmtMoney(booking.totalPaise, booking.currency)}</td></tr>
+          </table>
+          <p style="color:#6b7280;font-size:13px;margin-top:18px;">
+            Open the reconnct app → Switch to Hosting → My Listings → ${exp.name} to see the full booking list.
+          </p>
+        </div>
+      </div>
+    </div>
+  `;
+  const text = `New booking on ${exp.name} (${booking.bookingCode}) — guest ${booking.guestName || 'Guest'}, ${fmtMoney(booking.totalPaise, booking.currency)}.`;
+
+  return send({ to: host.email, subject, html, text });
+};
+
+module.exports = { sendBookingConfirmation, notifyHostOfBooking, buildVoucherHtml };

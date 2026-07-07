@@ -10,6 +10,7 @@ router.post('/preview', ctrl.preview);
 router.post('/', ctrl.create);
 router.get('/me', ctrl.listMine);
 router.get('/me/:code', ctrl.getMineByCode);
+router.get('/me/:code/voucher.pdf', ctrl.voucherPdf);
 router.get('/me/:code/cancel-quote', ctrl.cancelQuote);
 router.post('/me/:code/cancel', ctrl.cancelMine);
 

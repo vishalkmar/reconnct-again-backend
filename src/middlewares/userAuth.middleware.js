@@ -13,6 +13,10 @@ const extractToken = (req) => {
   // token here simply fails the kind check — no privilege crossover.
   const authHeader = req.headers.authorization || req.headers.Authorization;
   if (authHeader) return stripBearer(authHeader);
+  // Last resort: a `?token=` query param. Only needed for links opened by the
+  // OS (e.g. the app's "Download voucher" button uses Linking.openURL, which
+  // can't attach a custom header) — never required for normal fetch() calls.
+  if (req.query && req.query.token) return stripBearer(req.query.token);
   return null;
 };
 

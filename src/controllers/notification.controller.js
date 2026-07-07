@@ -1,5 +1,8 @@
 const asyncHandler = require('express-async-handler');
-const { Booking, WalletTransaction, User } = require('../models');
+const { Op } = require('sequelize');
+const {
+  Booking, WalletTransaction, User, Experience,
+} = require('../models');
 const { ok } = require('../utils/response');
 
 /*
@@ -17,13 +20,41 @@ const fromPaise = (p) => Math.round(Number(p || 0)) / 100;
 const list = asyncHandler(async (req, res) => {
   const userId = req.user.id;
 
-  const [bookings, txns, user] = await Promise.all([
+  const [bookings, txns, user, myListings] = await Promise.all([
     Booking.findAll({ where: { userId }, order: [['createdAt', 'DESC']], limit: 50 }),
     WalletTransaction.findAll({ where: { userId }, order: [['createdAt', 'DESC']], limit: 50 }),
     User.findByPk(userId, { attributes: ['name', 'createdAt'] }),
+    Experience.findAll({ where: { ownerUserId: userId }, attributes: ['id', 'name'] }),
   ]);
 
   const feed = [];
+
+  // "Switch to Hosting" side: bookings made on any experience this user owns.
+  // Same feed endpoint for both traveller and host notifications, so opening
+  // the bell from either mode shows the relevant real activity.
+  if (myListings.length) {
+    const listingNames = new Map(myListings.map((e) => [e.id, e.name]));
+    const hostBookings = await Booking.findAll({
+      where: {
+        itemType: 'experience',
+        itemId: { [Op.in]: myListings.map((e) => e.id) },
+        status: { [Op.in]: ['confirmed', 'completed'] },
+      },
+      order: [['createdAt', 'DESC']],
+      limit: 50,
+    });
+    for (const b of hostBookings) {
+      const j = b.toJSON();
+      feed.push({
+        id: `h${j.id}`,
+        kind: 'host_booking',
+        title: 'New booking on your listing',
+        body: `${listingNames.get(j.itemId) || 'Your experience'} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
+        amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
+        at: j.paidAt || j.createdAt,
+      });
+    }
+  }
 
   for (const b of bookings) {
     const j = b.toJSON();
