@@ -8,6 +8,7 @@ router.use(authenticateUser);
 router.get('/summary', ctrl.summary);
 router.get('/listings', ctrl.listMine);
 router.get('/listings/:id', ctrl.getMine);
+router.get('/bookings/:id', ctrl.getBooking);
 router.post('/listings', ctrl.createMine);
 router.put('/listings/:id', ctrl.updateMine);
 router.delete('/listings/:id', ctrl.removeMine);

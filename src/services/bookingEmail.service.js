@@ -140,6 +140,71 @@ const sendBookingConfirmation = async ({ booking }) => {
 };
 
 /**
+ * Voucher-style email for the HOST — same visual language as the guest's
+ * confirmation, but the payment block shows only the BASE amount (subtotal),
+ * never GST/convenience fee/discounts, since those are platform-side and not
+ * the host's payout basis.
+ */
+const buildHostVoucherHtml = (booking, exp) => {
+  const item = booking.itemSnapshot || {};
+  const scheduleLine = booking.scheduledEndAt
+    ? `${fmtDate(booking.scheduledFor)} → ${fmtDate(booking.scheduledEndAt)}`
+    : fmtDate(booking.scheduledFor);
+  const baseAmount = fmtMoney(booking.subtotalPaise, booking.currency);
+
+  const rows = [
+    ['When', scheduleLine],
+    ['Guests', booking.guestCount],
+    ['Guest name', escape(booking.guestName)],
+    ['Guest email', escape(booking.guestEmail)],
+    ['Guest phone', escape(booking.guestPhone)],
+  ];
+  if (booking.specialRequests) rows.push(['Special requests', escape(booking.specialRequests)]);
+
+  return `
+    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
+      <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
+        <!-- Ribbon -->
+        <div style="background:#F9B402;padding:24px 28px;color:#101010;">
+          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.8;">New booking on your listing</div>
+          <div style="font-family:Menlo,Consolas,monospace;font-weight:700;font-size:22px;margin-top:4px;letter-spacing:1px;">${escape(booking.bookingCode)}</div>
+        </div>
+
+        <!-- Item card -->
+        <div style="padding:20px 28px;border-bottom:1px solid #eef2f7;">
+          ${item.image ? `<img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;" />` : ''}
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Experience</div>
+          <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:4px;line-height:1.3;">${escape(exp.name)}</div>
+        </div>
+
+        <!-- Details -->
+        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;">
+          ${rows.map(([k, v]) => `
+            <tr>
+              <td style="padding:10px 28px;color:#64748b;font-size:13px;width:36%;border-bottom:1px solid #f1f5f9;">${escape(k)}</td>
+              <td style="padding:10px 28px;color:#0f172a;font-size:14px;font-weight:600;border-bottom:1px solid #f1f5f9;">${v}</td>
+            </tr>
+          `).join('')}
+        </table>
+
+        <!-- Base amount only -->
+        <div style="padding:18px 28px;background:#f8fafc;">
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:6px;">Base amount</div>
+          <div style="font-size:22px;font-weight:800;color:#0f766e;">${baseAmount}</div>
+          <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Excludes GST and platform convenience fee.</div>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding:18px 28px;font-size:12px;color:#64748b;line-height:1.6;">
+          Open the reconnct app → Switch to Hosting → My Listings → ${escape(exp.name)} to see this booking and everyone else who's booked.
+          <div style="margin-top:10px;">— Team reconnct</div>
+        </div>
+      </div>
+    </div>
+  `;
+};
+
+/**
  * Tell the HOST (the User who owns the Experience via ownerUserId) that one
  * of their listings just got booked. No-op for admin-authored experiences
  * (ownerUserId null) or non-experience bookings (rooms/packages/events don't
@@ -154,34 +219,18 @@ const notifyHostOfBooking = async ({ booking }) => {
   if (!host || !host.email) return;
 
   const subject = `New booking on ${exp.name} — ${booking.bookingCode}`;
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
-      <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-        <div style="background:#F9B402;padding:24px 28px;color:#101010;">
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.85;">New booking</div>
-          <div style="font-weight:800;font-size:20px;margin-top:4px;">${exp.name}</div>
-        </div>
-        <div style="padding:22px 28px;">
-          <p style="color:#374151;line-height:1.6;margin:0 0 14px;">
-            Someone just booked <strong>${exp.name}</strong>. Here are the details:
-          </p>
-          <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-size:14px;">
-            <tr><td style="padding:6px 0;color:#6b7280;width:40%;">Booking code</td><td style="padding:6px 0;font-weight:700;color:#0f172a;">${booking.bookingCode}</td></tr>
-            <tr><td style="padding:6px 0;color:#6b7280;">Guest</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${booking.guestName || 'Guest'}</td></tr>
-            <tr><td style="padding:6px 0;color:#6b7280;">Guests</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${booking.guestCount || 1}</td></tr>
-            <tr><td style="padding:6px 0;color:#6b7280;">Date</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${fmtDate(booking.scheduledFor)}</td></tr>
-            <tr><td style="padding:6px 0;color:#6b7280;">Amount</td><td style="padding:6px 0;font-weight:800;color:#0f766e;">${fmtMoney(booking.totalPaise, booking.currency)}</td></tr>
-          </table>
-          <p style="color:#6b7280;font-size:13px;margin-top:18px;">
-            Open the reconnct app → Switch to Hosting → My Listings → ${exp.name} to see the full booking list.
-          </p>
-        </div>
-      </div>
-    </div>
-  `;
-  const text = `New booking on ${exp.name} (${booking.bookingCode}) — guest ${booking.guestName || 'Guest'}, ${fmtMoney(booking.totalPaise, booking.currency)}.`;
+  const html = buildHostVoucherHtml(booking, exp);
+  const text = `New booking on ${exp.name} (${booking.bookingCode}) — guest ${booking.guestName || 'Guest'} (${booking.guestEmail || ''}, ${booking.guestPhone || ''}), base amount ${fmtMoney(booking.subtotalPaise, booking.currency)}.`;
 
-  return send({ to: host.email, subject, html, text });
+  let attachments;
+  try {
+    const pdf = await buildBookingVoucherPdf(booking, { hostView: true });
+    attachments = [{ filename: `host-voucher-${booking.bookingCode}.pdf`, content: pdf }];
+  } catch (err) {
+    console.error('[bookingEmail] host voucher PDF generation failed:', err.message);
+  }
+
+  return send({ to: host.email, subject, html, text, attachments });
 };
 
 module.exports = { sendBookingConfirmation, notifyHostOfBooking, buildVoucherHtml };

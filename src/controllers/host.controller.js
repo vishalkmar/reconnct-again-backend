@@ -51,6 +51,37 @@ const bookingsForExperience = async (experienceId) => {
   });
 };
 
+// GET /api/host/bookings/:id — full detail for a single booking, scoped to
+// listings the signed-in host actually owns (404s for anyone else's booking).
+const getBooking = asyncHandler(async (req, res) => {
+  const booking = await Booking.findByPk(req.params.id);
+  if (!booking || booking.itemType !== 'experience') return fail(res, 'Booking not found', 404);
+  const exp = await Experience.findOne({ where: { id: booking.itemId, ownerUserId: req.user.id } });
+  if (!exp) return fail(res, 'Booking not found', 404);
+
+  const j = booking.toJSON();
+  return ok(res, {
+    booking: {
+      id: j.id,
+      bookingCode: j.bookingCode,
+      status: hostBookingStatus(j),
+      guest: { name: j.guestName, email: j.guestEmail, phone: j.guestPhone, count: j.guestCount },
+      scheduledFor: j.scheduledFor,
+      scheduledEndAt: j.scheduledEndAt,
+      units: j.units,
+      specialRequests: j.specialRequests,
+      currency: j.currency || 'INR',
+      baseAmount: fromPaise(j.subtotalPaise || 0),
+      unitPrice: fromPaise(j.unitPricePaise || 0),
+      paymentId: j.paymentId,
+      paymentMethod: j.paymentMethod,
+      paidAt: j.paidAt,
+      createdAt: j.createdAt,
+      item: { id: exp.id, name: exp.name, image: exp.mainImage, city: exp.city, location: exp.location },
+    },
+  });
+});
+
 /*
   Host ("Switch to Host") API. A host listing IS an Experience whose
   ownerUserId is the signed-in user. Both the mobile app and the website submit
@@ -318,4 +349,4 @@ const summary = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listMine, getMine, createMine, updateMine, removeMine, summary };
+module.exports = { listMine, getMine, createMine, updateMine, removeMine, summary, getBooking };

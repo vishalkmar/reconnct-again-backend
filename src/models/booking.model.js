@@ -15,7 +15,7 @@ const Booking = sequelize.define(
     // Polymorphic — which bookable model does itemId reference. The exact same
     // four types as the wishlist so the heart and the booking flow agree.
     itemType: {
-      type: DataTypes.ENUM('package', 'room', 'event', 'addon', 'event_activity'),
+      type: DataTypes.ENUM('package', 'room', 'event', 'addon', 'event_activity', 'experience'),
       allowNull: false,
     },
     itemId: { type: DataTypes.INTEGER, allowNull: false },

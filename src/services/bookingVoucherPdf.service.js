@@ -57,8 +57,13 @@ const typeLabel = (t) => ({
  * Build a single-page PDF voucher for a booking. `booking` is the raw
  * Sequelize row (or its .toJSON()) — reads the same paise/JSON columns the
  * rest of the booking code does.
+ *
+ * `opts.hostView` renders the HOST's copy instead of the guest's: the
+ * pricing box shows only the base amount (subtotal — no GST/convenience fee/
+ * discounts, which are platform-side, not the host's payout basis).
  */
-const buildBookingVoucherPdf = async (bookingRow) => {
+const buildBookingVoucherPdf = async (bookingRow, opts = {}) => {
+  const hostView = !!opts.hostView;
   const b = bookingRow.toJSON ? bookingRow.toJSON() : bookingRow;
   const item = b.itemSnapshot || {};
   const currency = b.currency || 'INR';
@@ -68,13 +73,13 @@ const buildBookingVoucherPdf = async (bookingRow) => {
   const helv = await pdf.embedFont(StandardFonts.Helvetica);
   const bold = await pdf.embedFont(StandardFonts.HelveticaBold);
 
-  const text = (s, x, y, opts = {}) => page.drawText(sanitizeText(s), { x, y, size: opts.size || 10, font: opts.bold ? bold : helv, color: opts.color || INK });
+  const text = (s, x, y, opts2 = {}) => page.drawText(sanitizeText(s), { x, y, size: opts2.size || 10, font: opts2.bold ? bold : helv, color: opts2.color || INK });
   const line = (y) => page.drawLine({ start: { x: ML, y }, end: { x: PAGE_W - MR, y }, thickness: 1, color: LINE });
 
   // ── Header band ──────────────────────────────────────────────────────
   page.drawRectangle({ x: 0, y: PAGE_H - 92, width: PAGE_W, height: 92, color: BRAND });
   text('reconnct', ML, PAGE_H - 42, { size: 24, bold: true, color: WHITE });
-  text('Booking Voucher', ML, PAGE_H - 64, { size: 12, color: WHITE });
+  text(hostView ? 'Host Booking Voucher' : 'Booking Voucher', ML, PAGE_H - 64, { size: 12, color: WHITE });
   text(String(b.bookingCode || ''), PAGE_W - MR - 180, PAGE_H - 42, { size: 16, bold: true, color: WHITE });
   text((b.status || '').toUpperCase(), PAGE_W - MR - 180, PAGE_H - 62, { size: 10, color: WHITE });
 
@@ -115,7 +120,7 @@ const buildBookingVoucherPdf = async (bookingRow) => {
   line(y); y -= 24;
 
   // ── Lead traveller ───────────────────────────────────────────────────
-  text('LEAD TRAVELLER', ML, y, { size: 9, bold: true, color: MUTE }); y -= 18;
+  text(hostView ? 'GUEST' : 'LEAD TRAVELLER', ML, y, { size: 9, bold: true, color: MUTE }); y -= 18;
   text(`Name: ${b.guestName || '-'}`, ML, y, { size: 11 }); y -= 16;
   text(`Email: ${b.guestEmail || '-'}`, ML, y, { size: 11 }); y -= 16;
   text(`Phone: ${b.guestPhone || '-'}`, ML, y, { size: 11 }); y -= 12;
@@ -127,35 +132,47 @@ const buildBookingVoucherPdf = async (bookingRow) => {
   y -= 10;
   line(y); y -= 24;
 
-  // ── Payment ──────────────────────────────────────────────────────────
-  text('PAYMENT', ML, y, { size: 9, bold: true, color: MUTE }); y -= 18;
-  text(`Payment reference: ${b.paymentId || '-'}`, ML, y, { size: 10 }); y -= 15;
-  text(`Method: ${b.paymentMethod || '-'}`, ML, y, { size: 10 }); y -= 15;
-  text(`Paid at: ${b.paidAt ? fmtDate(b.paidAt) : '-'}`, ML, y, { size: 10 }); y -= 12;
-  y -= 10;
+  if (hostView) {
+    // Host copy: base amount only — GST/convenience fee/discounts are
+    // platform-side, not part of the host's payout basis.
+    text('AMOUNT', ML, y, { size: 9, bold: true, color: MUTE }); y -= 18;
+    const boxH = 46;
+    page.drawRectangle({ x: ML, y: y - boxH, width: CW, height: boxH, color: ZEBRA });
+    const baseLabel = `Base amount (${b.units || b.guestCount || 1} x ${fmtMoney(b.unitPricePaise, currency)})`;
+    text(baseLabel, ML + 12, y - 18, { size: 10, color: MUTE });
+    const baseStr = fmtMoney(b.subtotalPaise, currency);
+    text(baseStr, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(baseStr), 14), y - 30, { size: 14, bold: true, color: rgb(0.06, 0.46, 0.43) });
+  } else {
+    // ── Payment ────────────────────────────────────────────────────────
+    text('PAYMENT', ML, y, { size: 9, bold: true, color: MUTE }); y -= 18;
+    text(`Payment reference: ${b.paymentId || '-'}`, ML, y, { size: 10 }); y -= 15;
+    text(`Method: ${b.paymentMethod || '-'}`, ML, y, { size: 10 }); y -= 15;
+    text(`Paid at: ${b.paidAt ? fmtDate(b.paidAt) : '-'}`, ML, y, { size: 10 }); y -= 12;
+    y -= 10;
 
-  // Pricing box (zebra rows)
-  const priceRows = [
-    [`Subtotal (${b.units || b.guestCount || 1} x ${fmtMoney(b.unitPricePaise, currency)})`, fmtMoney(b.subtotalPaise, currency)],
-    ['Taxes', fmtMoney(b.taxPaise, currency)],
-  ];
-  if (b.walletDiscountPaise > 0) priceRows.push(['Wallet credit', `- ${fmtMoney(b.walletDiscountPaise, currency)}`]);
-  if (b.couponDiscountPaise > 0) priceRows.push([`Coupon ${b.couponCode || ''}`.trim(), `- ${fmtMoney(b.couponDiscountPaise, currency)}`]);
+    // Pricing box (zebra rows)
+    const priceRows = [
+      [`Subtotal (${b.units || b.guestCount || 1} x ${fmtMoney(b.unitPricePaise, currency)})`, fmtMoney(b.subtotalPaise, currency)],
+      ['Taxes', fmtMoney(b.taxPaise, currency)],
+    ];
+    if (b.walletDiscountPaise > 0) priceRows.push(['Wallet credit', `- ${fmtMoney(b.walletDiscountPaise, currency)}`]);
+    if (b.couponDiscountPaise > 0) priceRows.push([`Coupon ${b.couponCode || ''}`.trim(), `- ${fmtMoney(b.couponDiscountPaise, currency)}`]);
 
-  const boxTop = y;
-  const boxH = (priceRows.length + 1) * 22 + 16;
-  page.drawRectangle({ x: ML, y: boxTop - boxH, width: CW, height: boxH, color: ZEBRA });
-  let py = boxTop - 16;
-  priceRows.forEach(([k, v]) => {
-    text(k, ML + 12, py, { size: 10, color: MUTE });
-    text(v, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(v), 11), py, { size: 11 });
-    py -= 22;
-  });
-  page.drawLine({ start: { x: ML + 12, y: py + 6 }, end: { x: PAGE_W - MR - 12, y: py + 6 }, thickness: 1, color: LINE });
-  py -= 12;
-  text('Total paid', ML + 12, py, { size: 12, bold: true });
-  const totalStr = fmtMoney(b.totalPaise, currency);
-  text(totalStr, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(totalStr), 14), py, { size: 14, bold: true, color: rgb(0.06, 0.46, 0.43) });
+    const boxTop = y;
+    const boxH = (priceRows.length + 1) * 22 + 16;
+    page.drawRectangle({ x: ML, y: boxTop - boxH, width: CW, height: boxH, color: ZEBRA });
+    let py = boxTop - 16;
+    priceRows.forEach(([k, v]) => {
+      text(k, ML + 12, py, { size: 10, color: MUTE });
+      text(v, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(v), 11), py, { size: 11 });
+      py -= 22;
+    });
+    page.drawLine({ start: { x: ML + 12, y: py + 6 }, end: { x: PAGE_W - MR - 12, y: py + 6 }, thickness: 1, color: LINE });
+    py -= 12;
+    text('Total paid', ML + 12, py, { size: 12, bold: true });
+    const totalStr = fmtMoney(b.totalPaise, currency);
+    text(totalStr, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(totalStr), 14), py, { size: 14, bold: true, color: rgb(0.06, 0.46, 0.43) });
+  }
 
   // ── Footer ───────────────────────────────────────────────────────────
   text('Keep this voucher handy - show the booking code above at check-in.', ML, 50, { size: 9, color: MUTE });

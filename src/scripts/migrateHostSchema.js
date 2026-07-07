@@ -44,6 +44,35 @@ const migrate = async () => {
   // Host business/company name on the user profile.
   await addColumnIfMissing('users', 'company', 'VARCHAR(180) NULL', summary);
 
+  // bookings.itemType ENUM had the exact same missing-'experience' bug as
+  // wishlist_items below — every experience booking (this app's ONLY real
+  // booking target) silently coerced to itemType='' on save. That broke every
+  // query filtering on itemType==='experience': the host's per-listing
+  // bookings feed, the host dashboard stats, and the notifications feed all
+  // silently saw zero bookings even though real, paid bookings existed.
+  if (await tableExists('bookings')) {
+    const col = await describeColumn('bookings', 'itemType');
+    if (col && !/experience/i.test(col.Type || '')) {
+      try {
+        await sequelize.query(
+          "ALTER TABLE `bookings` MODIFY COLUMN `itemType` ENUM('package','room','event','addon','event_activity','experience') NOT NULL",
+        );
+        summary.changes.push("bookings.itemType ENUM +experience");
+      } catch (err) {
+        summary.changes.push(`bookings.itemType alter failed: ${err.message}`);
+      }
+    }
+    try {
+      const [res] = await sequelize.query(
+        "UPDATE `bookings` SET `itemType` = 'experience' WHERE (`itemType` = '' OR `itemType` IS NULL) AND JSON_UNQUOTE(JSON_EXTRACT(`itemSnapshot`, '$.type')) = 'experience'",
+      );
+      const fixed = res && (res.affectedRows != null ? res.affectedRows : 0);
+      if (fixed) summary.changes.push(`bookings backfilled ${fixed} empty-itemType row(s) to 'experience'`);
+    } catch (err) {
+      summary.changes.push(`bookings itemType backfill failed: ${err.message}`);
+    }
+  }
+
   // wishlist_items.entityType ENUM was missing 'experience', so MySQL coerced
   // experience saves to '' (empty). Widen the ENUM, then delete the malformed
   // empty-type rows so users can re-save experiences cleanly.

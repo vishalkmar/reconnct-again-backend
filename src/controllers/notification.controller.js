@@ -28,6 +28,10 @@ const list = asyncHandler(async (req, res) => {
   ]);
 
   const feed = [];
+  // scheduledFor is DATE-ONLY (no time of day stored anywhere reliable), so
+  // the closest honest "reminder" we can derive is "this is happening today"
+  // — not a precise N-hours-before alert, which the data can't support yet.
+  const todayYMD = new Date().toISOString().slice(0, 10);
 
   // "Switch to Hosting" side: bookings made on any experience this user owns.
   // Same feed endpoint for both traveller and host notifications, so opening
@@ -45,14 +49,24 @@ const list = asyncHandler(async (req, res) => {
     });
     for (const b of hostBookings) {
       const j = b.toJSON();
+      const listingName = listingNames.get(j.itemId) || 'Your experience';
       feed.push({
         id: `h${j.id}`,
         kind: 'host_booking',
         title: 'New booking on your listing',
-        body: `${listingNames.get(j.itemId) || 'Your experience'} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
+        body: `${listingName} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
         amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
         at: j.paidAt || j.createdAt,
       });
+      if (j.status === 'confirmed' && j.scheduledFor === todayYMD) {
+        feed.push({
+          id: `hr${j.id}`,
+          kind: 'reminder',
+          title: 'Booking today',
+          body: `${listingName} has a guest today — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
+          at: new Date().toISOString(),
+        });
+      }
     }
   }
 
@@ -71,6 +85,15 @@ const list = asyncHandler(async (req, res) => {
       amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
       at: j.createdAt || j.scheduledFor,
     });
+    if (j.status === 'confirmed' && j.scheduledFor === todayYMD) {
+      feed.push({
+        id: `r${j.id}`,
+        kind: 'reminder',
+        title: 'Happening today',
+        body: `${title} is today — don't forget!`,
+        at: new Date().toISOString(),
+      });
+    }
   }
 
   for (const t of txns) {
