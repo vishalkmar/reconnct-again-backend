@@ -132,9 +132,18 @@ const removeCategory = asyncHandler(async (req, res) => {
 });
 
 // ─────────────────────────── TYPES (under a category) ──────────────────────
+// Supports either a single ?categoryId= (existing single-select callers: the
+// host web/app wizards, the admin's own type manager) or a comma-separated
+// ?categoryIds=1,2,3 (the multi-select admin form's "union of types across
+// every selected category").
 const listTypes = asyncHandler(async (req, res) => {
   const where = req.query.all === 'true' ? {} : { isActive: true };
-  if (req.query.categoryId) where.categoryId = parseInt(req.query.categoryId, 10);
+  if (req.query.categoryIds) {
+    const ids = String(req.query.categoryIds).split(',').map((s) => parseInt(s, 10)).filter(Number.isInteger);
+    if (ids.length) where.categoryId = { [Op.in]: ids };
+  } else if (req.query.categoryId) {
+    where.categoryId = parseInt(req.query.categoryId, 10);
+  }
   const items = await ExperienceType.findAll({ where, order: [['sortOrder', 'ASC'], ['name', 'ASC']] });
   return ok(res, { items });
 });

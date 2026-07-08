@@ -131,6 +131,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migrateExperienceTaxonomyArrays } = require('./scripts/migrateExperienceTaxonomyArrays');
+    const result = await migrateExperienceTaxonomyArrays();
+    if (result.changes?.length) {
+      console.log(`[DB] Experience taxonomy array fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Experience taxonomy array migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migrateScheduleData } = require('./scripts/migrateScheduleData');
     const result = await migrateScheduleData();
     if (result.changes?.length) {

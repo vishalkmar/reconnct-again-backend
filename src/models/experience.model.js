@@ -4,9 +4,15 @@ const { sequelize } = require('../config/database');
 /*
   Experience — the unified Activity / Event record built from the admin form.
   Structure mirrors the Reconnct chart + the form spec:
-    - audiences  : JSON array of ExperienceAudience ids (multi-select)
-    - categoryId : the single broad ExperienceCategory
-    - typeId     : the ExperienceType under that category
+    - audiences   : JSON array of ExperienceAudience ids (multi-select)
+    - categoryIds : JSON array of ExperienceCategory ids (multi-select)
+    - typeIds     : JSON array of ExperienceType ids, drawn from any of the
+                    selected categories (multi-select)
+    - categoryId / typeId : kept in sync as the FIRST selected id, purely for
+      backward compatibility — every consumer that still expects a single
+      category/type (public browse filter, badge displays, the host web/app
+      wizards, which haven't been converted to multi-select yet) keeps working
+      unchanged. categoryIds/typeIds are the real, current source of truth.
   Concrete, known fields are real columns; the still-evolving / large blocks
   (dynamic pricing, schedule calendar, inclusions, faqs, …) are JSON so the form
   can keep growing task-by-task WITHOUT a migration each time.
@@ -22,6 +28,8 @@ const Experience = sequelize.define(
     audiences: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }, // [audienceId,…]
     categoryId: { type: DataTypes.INTEGER, allowNull: true },
     typeId: { type: DataTypes.INTEGER, allowNull: true },
+    categoryIds: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }, // [categoryId,…]
+    typeIds: { type: DataTypes.JSON, allowNull: false, defaultValue: [] }, // [typeId,…]
     // Optional owning supplier (admin "Suppliers" tab).
     supplierId: { type: DataTypes.INTEGER, allowNull: true },
     // The host (a User) who created this listing via "Switch to Host" on the
