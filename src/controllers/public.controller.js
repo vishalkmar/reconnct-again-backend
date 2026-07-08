@@ -222,10 +222,16 @@ const taxonomy = asyncHandler(async (req, res) => {
 });
 
 // GET /api/public/types?categoryId=  — types for a category (host onboarding).
+// Also accepts ?categoryIds=1,2,3 (comma list) for the union of types across
+// every selected category — the multi-select host wizard's taxonomy picker.
 const types = asyncHandler(async (req, res) => {
-  const categoryId = req.query.categoryId ? Number(req.query.categoryId) : null;
   const where = { isActive: true };
-  if (categoryId) where.categoryId = categoryId;
+  if (req.query.categoryIds) {
+    const ids = String(req.query.categoryIds).split(',').map((s) => parseInt(s, 10)).filter(Number.isInteger);
+    if (ids.length) where.categoryId = { [Op.in]: ids };
+  } else if (req.query.categoryId) {
+    where.categoryId = Number(req.query.categoryId);
+  }
   const rows = await ExperienceType.findAll({
     where,
     order: [['sortOrder', 'ASC'], ['name', 'ASC']],

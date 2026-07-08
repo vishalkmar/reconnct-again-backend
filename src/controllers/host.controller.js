@@ -137,8 +137,13 @@ const mapFormToExperience = (form = {}) => {
   return {
     name: String(form.name || '').trim() || 'Untitled listing',
     audiences: Array.isArray(form.audiences) ? form.audiences : [],
-    categoryId: form.categoryId || null,
-    typeId: form.typeId || null,
+    categoryIds: Array.isArray(form.categoryIds) ? form.categoryIds : [],
+    typeIds: Array.isArray(form.typeIds) ? form.typeIds : [],
+    // Kept in sync as the first selected id — every consumer that still
+    // expects a single value (public browse filter, badge displays) keeps
+    // working unchanged.
+    categoryId: Array.isArray(form.categoryIds) ? (form.categoryIds[0] || null) : null,
+    typeId: Array.isArray(form.typeIds) ? (form.typeIds[0] || null) : null,
     location: form.location || null,
     city: form.city || null,
     nearbyLocation: form.nearbyLocation || null,
@@ -210,8 +215,8 @@ const toHostForm = (exp) => {
   return {
     id: j.id,
     audiences: j.audiences || [],
-    categoryId: j.categoryId || null,
-    typeId: j.typeId || null,
+    categoryIds: Array.isArray(j.categoryIds) && j.categoryIds.length ? j.categoryIds : (j.categoryId ? [j.categoryId] : []),
+    typeIds: Array.isArray(j.typeIds) && j.typeIds.length ? j.typeIds : (j.typeId ? [j.typeId] : []),
     typeName: (j.data && j.data.typeName) || (j.type && j.type.name) || '',
     name: j.name || '',
     location: j.location || '',
