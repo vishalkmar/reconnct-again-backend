@@ -2,7 +2,16 @@ const multer = require('multer');
 const path = require('path');
 const { cloudinary, ROOT_FOLDER, isConfigured } = require('../config/cloudinary');
 
+// Outer safety net for the whole multipart body (images + videos + docs) —
+// generous, since videos legitimately need more room.
 const MAX_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || '50', 10);
+
+// Global rule, every image upload anywhere on the platform: max 5MB. Enforced
+// AFTER multer finishes buffering (see cloudinaryStreamUploader below) since
+// multer's own `limits.fileSize` can't vary by file type — every new upload
+// route automatically inherits this because they all go through buildUploader().
+const MAX_IMAGE_MB = parseInt(process.env.MAX_IMAGE_SIZE_MB || '5', 10);
+const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024;
 
 const DEFAULT_ALLOWED = /jpeg|jpg|png|gif|webp|svg|mp4|webm|mov|avi/;
 
@@ -12,8 +21,10 @@ const createFileFilter = ({
 } = {}) => (req, file, cb) => {
   const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
   const ok = allowed.test(ext) || allowed.test(file.mimetype);
-  if (ok) cb(null, true);
-  else cb(new Error(message));
+  if (ok) return cb(null, true);
+  const err = new Error(message);
+  err.status = 400;
+  cb(err);
 };
 
 // Memory storage — files held in RAM until streamed to Cloudinary
@@ -78,6 +89,12 @@ const cloudinaryStreamUploader = (subfolder) => async (req, res, next) => {
     const uploadOne = async (file) => {
       if (!file?.buffer) return;
       const resourceType = guessResourceType(file);
+      if (resourceType === 'image' && file.buffer.length > MAX_IMAGE_BYTES) {
+        const mb = (file.buffer.length / (1024 * 1024)).toFixed(1);
+        const err = new Error(`"${file.originalname}" is ${mb}MB — images must be smaller than ${MAX_IMAGE_MB}MB.`);
+        err.status = 400;
+        throw err;
+      }
       if (resourceType === 'raw') {
         file.emailAttachmentBuffer = Buffer.from(file.buffer);
       }
@@ -132,4 +149,4 @@ const buildUploader = (subfolder = 'misc', options = {}) => {
   };
 };
 
-module.exports = { buildUploader };
+module.exports = { buildUploader, MAX_IMAGE_MB, MAX_IMAGE_BYTES };

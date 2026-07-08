@@ -2,7 +2,7 @@ const router = require('express').Router();
 const asyncHandler = require('express-async-handler');
 const { authenticate } = require('../middlewares/auth.middleware');
 const { authenticateUser } = require('../middlewares/userAuth.middleware');
-const { buildUploader } = require('../middlewares/upload.middleware');
+const { buildUploader, MAX_IMAGE_MB, MAX_IMAGE_BYTES } = require('../middlewares/upload.middleware');
 const { getUploadedUrl } = require('../utils/uploads');
 const { ok, fail } = require('../utils/response');
 
@@ -47,7 +47,7 @@ router.post(
 // remote image so the admin can "paste a link" in an uploader. Streaming the
 // bytes back from our own origin sidesteps the browser CORS wall, letting the
 // client turn the response into a File and run it through the normal upload
-// pipeline. Guards: http(s) only, image content-type only, 15MB cap.
+// pipeline. Guards: http(s) only, image content-type only, same global 5MB cap.
 router.get(
   '/proxy-image',
   authenticate,
@@ -71,7 +71,7 @@ router.get(
     const ct = upstream.headers.get('content-type') || '';
     if (!ct.startsWith('image/')) return fail(res, 'That URL is not an image', 400);
     const buf = Buffer.from(await upstream.arrayBuffer());
-    if (buf.length > 15 * 1024 * 1024) return fail(res, 'Image too large (max 15MB)', 400);
+    if (buf.length > MAX_IMAGE_BYTES) return fail(res, `Image too large (max ${MAX_IMAGE_MB}MB)`, 400);
     res.set('Content-Type', ct);
     res.set('Cache-Control', 'no-store');
     return res.send(buf);
