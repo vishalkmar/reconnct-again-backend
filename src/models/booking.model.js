@@ -33,13 +33,12 @@ const Booking = sequelize.define(
     scheduledEndAt: { type: DataTypes.DATEONLY, allowNull: true },
     // Real, comparable instant (UTC) the experience starts — resolved from
     // scheduledFor (date-only) + any "Preferred time" the guest gave. Powers
-    // the 12h/2h-before reminder sweep; scheduledFor/scheduledEndAt above stay
+    // the 6h-before email reminder sweep; scheduledFor/scheduledEndAt above stay
     // date-only for everything else (display, cancellation windows, etc).
     scheduledAt: { type: DataTypes.DATE, allowNull: true },
-    // Set the moment each reminder wave actually goes out — makes the sweep
+    // Set the moment the email reminder actually goes out — makes the sweep
     // idempotent (never double-sends) no matter how often it runs.
-    reminder12hSentAt: { type: DataTypes.DATE, allowNull: true },
-    reminder2hSentAt: { type: DataTypes.DATE, allowNull: true },
+    reminderEmailSentAt: { type: DataTypes.DATE, allowNull: true },
     // Convenience: nights = end - start for rooms; days for packages.
     units: {
       type: DataTypes.INTEGER,

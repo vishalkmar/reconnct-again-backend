@@ -28,9 +28,12 @@ const list = asyncHandler(async (req, res) => {
   ]);
 
   const feed = [];
-  // Same 12h/2h windows the email reminder sweep uses (reminder.service.js),
-  // computed off the real scheduledAt instant now that one exists.
+  // The in-app "starting soon" reminder — separate from the 6h-before EMAIL
+  // wave (reminder.service.js) — fires within 1 hour of scheduledAt. This is
+  // derived live off the real scheduledAt instant, not an active dispatch, so
+  // it just shows/hides itself as the window opens.
   const now = Date.now();
+  const REMINDER_WINDOW_HOURS = 1;
   const withinHours = (scheduledAt, hours) => {
     if (!scheduledAt) return false;
     const diffMs = new Date(scheduledAt).getTime() - now;
@@ -65,12 +68,11 @@ const list = asyncHandler(async (req, res) => {
         amount: j.subtotalPaise ? fromPaise(j.subtotalPaise) : null,
         at: j.paidAt || j.createdAt,
       });
-      if (j.status === 'confirmed' && withinHours(j.scheduledAt, 12)) {
-        const soon = withinHours(j.scheduledAt, 2);
+      if (j.status === 'confirmed' && withinHours(j.scheduledAt, REMINDER_WINDOW_HOURS)) {
         feed.push({
           id: `hr${j.id}`,
           kind: 'reminder',
-          title: soon ? 'Booking in 2 hours' : 'Booking in 12 hours',
+          title: 'Booking in 1 hour',
           body: `${listingName} — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
           at: new Date().toISOString(),
         });
@@ -93,12 +95,11 @@ const list = asyncHandler(async (req, res) => {
       amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
       at: j.createdAt || j.scheduledFor,
     });
-    if (j.status === 'confirmed' && withinHours(j.scheduledAt, 12)) {
-      const soon = withinHours(j.scheduledAt, 2);
+    if (j.status === 'confirmed' && withinHours(j.scheduledAt, REMINDER_WINDOW_HOURS)) {
       feed.push({
         id: `r${j.id}`,
         kind: 'reminder',
-        title: soon ? 'Starting in 2 hours' : 'Starting in 12 hours',
+        title: 'Starting in 1 hour',
         body: `${title} — don't forget!`,
         at: new Date().toISOString(),
       });

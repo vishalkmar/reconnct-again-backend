@@ -3,15 +3,17 @@ const { Booking, Experience, User } = require('../models');
 const { sendGuestReminder, sendHostReminder } = require('./bookingEmail.service');
 
 /*
-  Booking reminder sweep — fires a "starting in N hours" email (+ the
-  in-app notifications feed picks up the same window separately) to both
-  the guest and the listing's host, once at 12 hours before and once at
-  2 hours before. Runs on a periodic timer (see server.js) rather than a
-  precise per-booking schedule; the reminderXhSentAt columns make each wave
-  idempotent no matter how often the sweep runs.
+  Booking reminder sweep — a single "starting in 6 hours" EMAIL to both the
+  guest and the listing's host. The equivalent in-app "starting in 1 hour"
+  notification is handled separately: notification.controller.js's derived
+  feed shows it live whenever a client asks, no active dispatch needed for
+  that one. Runs on a periodic timer (see server.js) rather than a precise
+  per-booking schedule; reminderEmailSentAt makes the wave idempotent no
+  matter how often the sweep runs.
 */
 
 const HOUR_MS = 60 * 60 * 1000;
+const EMAIL_HOURS_BEFORE = 6;
 
 const runWave = async ({ hoursBefore, field }) => {
   const now = new Date();
@@ -57,9 +59,8 @@ const runWave = async ({ hoursBefore, field }) => {
 
 const sweepReminders = async () => {
   try {
-    const n12 = await runWave({ hoursBefore: 12, field: 'reminder12hSentAt' });
-    const n2 = await runWave({ hoursBefore: 2, field: 'reminder2hSentAt' });
-    if (n12 || n2) console.log(`[reminder] sent ${n12} 12h + ${n2} 2h reminder wave(s)`);
+    const n = await runWave({ hoursBefore: EMAIL_HOURS_BEFORE, field: 'reminderEmailSentAt' });
+    if (n) console.log(`[reminder] sent ${n} ${EMAIL_HOURS_BEFORE}h-before email reminder(s)`);
   } catch (err) {
     console.error('[reminder] sweep failed:', err.message);
   }

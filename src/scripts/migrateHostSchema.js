@@ -73,11 +73,26 @@ const migrate = async () => {
     }
   }
 
-  // 12h/2h-before booking reminders need a real comparable instant, not the
-  // date-only scheduledFor.
+  // Booking reminders need a real comparable instant, not the date-only
+  // scheduledFor.
   await addColumnIfMissing('bookings', 'scheduledAt', 'DATETIME NULL', summary);
-  await addColumnIfMissing('bookings', 'reminder12hSentAt', 'DATETIME NULL', summary);
-  await addColumnIfMissing('bookings', 'reminder2hSentAt', 'DATETIME NULL', summary);
+  // Was reminder12hSentAt back when the sweep fired two waves (12h/2h) — now a
+  // single 6h-before email wave. Rename in place (not add-new) so any row that
+  // already sent its old 12h reminder doesn't get emailed again under the new
+  // column.
+  if (await tableExists('bookings')) {
+    const oldCol = await describeColumn('bookings', 'reminder12hSentAt');
+    const newCol = await describeColumn('bookings', 'reminderEmailSentAt');
+    if (oldCol && !newCol) {
+      try {
+        await sequelize.query('ALTER TABLE `bookings` CHANGE COLUMN `reminder12hSentAt` `reminderEmailSentAt` DATETIME NULL');
+        summary.changes.push('bookings.reminder12hSentAt renamed to reminderEmailSentAt');
+      } catch (err) {
+        summary.changes.push(`bookings.reminderEmailSentAt rename failed: ${err.message}`);
+      }
+    }
+  }
+  await addColumnIfMissing('bookings', 'reminderEmailSentAt', 'DATETIME NULL', summary);
 
   // Backfill scheduledAt for existing confirmed bookings that predate the
   // column, so the reminder sweep can pick them up too (harmless no-op for
