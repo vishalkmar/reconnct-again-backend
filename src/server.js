@@ -131,6 +131,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migrateScheduleData } = require('./scripts/migrateScheduleData');
+    const result = await migrateScheduleData();
+    if (result.changes?.length) {
+      console.log(`[DB] Schedule data fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Schedule data migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migrateReviews } = require('./scripts/migrateReviews');
     const result = await migrateReviews();
     if (result.copied) {

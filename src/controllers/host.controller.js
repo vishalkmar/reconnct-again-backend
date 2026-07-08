@@ -165,7 +165,10 @@ const mapFormToExperience = (form = {}) => {
     facilities: Array.isArray(form.facilities) ? form.facilities : [],
     nearbyPlaces: Array.isArray(form.nearbyPlaces) ? form.nearbyPlaces : [],
     faqs: Array.isArray(form.faqs) ? form.faqs.filter((f) => f && (f.question || f.answer)) : [],
-    schedule: { dateRows: Array.isArray(form.dateRows) ? form.dateRows : [] },
+    // Same `dates` key the admin Experience builder uses (ExperienceScheduling.jsx)
+    // — one canonical schedule shape read by the app's booking calendar and the
+    // admin panel, regardless of which side created the listing.
+    schedule: { dates: Array.isArray(form.dateRows) ? form.dateRows : [] },
     data: {
       typeName: form.typeName || '',
       durationLabel,
@@ -230,7 +233,7 @@ const toHostForm = (exp) => {
     capacity: p.capacity || 8,
     durationHours: p.durationHours || 0,
     durationMinutes: p.durationMinutes || 0,
-    dateRows: (j.schedule && j.schedule.dateRows) || [],
+    dateRows: (j.schedule && Array.isArray(j.schedule.dates) ? j.schedule.dates : []),
     photos: j.gallery || [],
     videos: Array.isArray(j.videos) ? j.videos.map((v) => (typeof v === 'string' ? v : v.url)).filter(Boolean) : [],
   };
