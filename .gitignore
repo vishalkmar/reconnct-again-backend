@@ -5,3 +5,7 @@ uploads/*
 !uploads/.gitkeep
 logs
 *.log
+
+# Firebase Admin SDK service-account key (FCM push) — never committed.
+firebase*.json
+*service-account*.json
