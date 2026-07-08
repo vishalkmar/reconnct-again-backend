@@ -28,26 +28,20 @@ const adminBookingShape = (booking) => {
   };
 };
 
-// GET /api/admin/bookings
-// Query params: status, itemType, q (search booking code/guest), from, to,
-// page, limit. Newest first.
-const list = asyncHandler(async (req, res) => {
-  const where = {};
-  if (req.query.status) where.status = String(req.query.status);
-  if (req.query.itemType) where.itemType = String(req.query.itemType);
-
-  // Date range — applied against scheduledFor so the admin can see "all
-  // bookings happening this month" instead of "all bookings created this
-  // month". Both bounds are inclusive on the calendar day.
+// Shared search/date/type conditions (everything except status/paidOnly),
+// so the "how much is pending" stat can be computed on the same filters even
+// when the main query itself is gated to paid-only (the Transactions page).
+const searchConditions = (req) => {
+  const cond = {};
+  if (req.query.itemType) cond.itemType = String(req.query.itemType);
   if (req.query.from || req.query.to) {
-    where.scheduledFor = {};
-    if (req.query.from) where.scheduledFor[Op.gte] = String(req.query.from);
-    if (req.query.to) where.scheduledFor[Op.lte] = String(req.query.to);
+    cond.scheduledFor = {};
+    if (req.query.from) cond.scheduledFor[Op.gte] = String(req.query.from);
+    if (req.query.to) cond.scheduledFor[Op.lte] = String(req.query.to);
   }
-
   if (req.query.q) {
     const q = `%${String(req.query.q).trim()}%`;
-    where[Op.or] = [
+    cond[Op.or] = [
       { bookingCode: { [Op.like]: q } },
       { guestName: { [Op.like]: q } },
       { guestEmail: { [Op.like]: q } },
@@ -56,6 +50,16 @@ const list = asyncHandler(async (req, res) => {
       { paymentOrderId: { [Op.like]: q } },
     ];
   }
+  return cond;
+};
+
+// GET /api/admin/bookings
+// Query params: status, itemType, q (search booking code/guest), from, to,
+// page, limit. Newest first.
+const list = asyncHandler(async (req, res) => {
+  const base = searchConditions(req);
+  const where = { ...base };
+  if (req.query.status) where.status = String(req.query.status);
 
   // Optional "paid only" mode for the Transactions page on the admin side —
   // saves the client from re-filtering after fetching everything.
@@ -92,6 +96,16 @@ const list = asyncHandler(async (req, res) => {
     totalRefundPaise += b.refundAmountPaise || 0;
   }
 
+  // Pending payment — computed on the same search/date/type filters but WITHOUT
+  // the paidOnly gate, so the Transactions page (which always queries
+  // paidOnly=true) can still show "how much is pending" alongside its paid ledger.
+  const pendingRows = await Booking.findAll({
+    where: { ...base, status: 'pending_payment' },
+    attributes: ['totalPaise'],
+  });
+  const pendingCount = pendingRows.length;
+  const pendingAmountPaise = pendingRows.reduce((s, b) => s + (b.totalPaise || 0), 0);
+
   return ok(res, {
     bookings: rows.map(adminBookingShape),
     page,
@@ -104,6 +118,8 @@ const list = asyncHandler(async (req, res) => {
       paidCount,
       cancelledCount,
       bookingCount: all.length,
+      pendingCount,
+      pendingAmount: fromPaise(pendingAmountPaise),
     },
   });
 });
