@@ -46,6 +46,7 @@ const Experience = sequelize.define(
     latitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
     longitude: { type: DataTypes.DECIMAL(10, 7), allowNull: true },
     rating: { type: DataTypes.DECIMAL(3, 2), defaultValue: 0 },
+    reviewCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     about: { type: DataTypes.TEXT('long'), allowNull: true },
 
     // Media — instant-upload URLs (no separate image table)

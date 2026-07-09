@@ -1,9 +1,11 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
-const { Review, Package, Event, Hotel, sequelize } = require('../models');
+const {
+  Review, Package, Event, Hotel, Experience, sequelize,
+} = require('../models');
 const { ok, created, fail } = require('../utils/response');
 
-const ENTITY_TYPES = ['package', 'event', 'hotel'];
+const ENTITY_TYPES = ['package', 'event', 'hotel', 'experience'];
 
 // Each entity type maps to: the model that owns the rating fields, the
 // public-listing image attribute, and the URL slug field used on the website.
@@ -11,6 +13,7 @@ const ENTITY_MAP = {
   package: { Model: Package, image: 'primaryImage', urlField: 'slug', publicPath: '/retreats' },
   event:   { Model: Event,   image: 'mainImage',    urlField: 'slug', publicPath: '/events' },
   hotel:   { Model: Hotel,   image: 'primaryImage', urlField: 'slug', publicPath: '/hotels' },
+  experience: { Model: Experience, image: 'mainImage', urlField: 'slug', publicPath: '/experiences' },
 };
 
 const isValidType = (t) => ENTITY_TYPES.includes(t);

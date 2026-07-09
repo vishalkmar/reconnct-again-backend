@@ -1,7 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const {
-  Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier, User,
+  Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier, User, Review,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { coordsForCity, haversineKm } = require('./geo.controller');
@@ -86,7 +86,7 @@ const cardShape = async (exp) => {
     city: j.city,
     location: j.location,
     rating: Number(j.rating) || 0,
-    reviewsCount: (j.data && j.data.reviewsCount) || (Array.isArray(j.data && j.data.reviews) ? j.data.reviews.length : 0),
+    reviewsCount: Number(j.reviewCount) || 0,
     category: j.category ? { id: j.category.id, name: j.category.name, slug: j.category.slug, colorHex: j.category.colorHex } : null,
     type: j.type ? { id: j.type.id, name: j.type.name, slug: j.type.slug } : null,
     audiences: await hydrateAudiences(j.audiences),
@@ -123,13 +123,31 @@ const detailShape = async (exp) => {
     pricing: j.pricing || {},
     childBands: childBands(j),
     schedule: j.schedule || {},
-    reviews: Array.isArray(j.data && j.data.reviews) ? j.data.reviews : [],
+    reviews: await realReviews(j.id),
     // "Hosted by" prefers the real host account (ownerUserId — a "Switch to
     // Host" User) over the admin-assigned Supplier label, since the host is
     // who actually gets the booking email/notification for this listing.
     // Falls back to the Supplier badge when there's no host attached yet.
     supplier: await hostBadge(j),
   };
+};
+
+// Real, approved reviews for this experience — shaped exactly how the app's
+// DetailScreen (and any future web equivalent) already render them:
+// { id, name, rating, date, comment }. Newest first, capped at 50.
+const realReviews = async (experienceId) => {
+  const rows = await Review.findAll({
+    where: { entityType: 'experience', entityId: experienceId, isApproved: true },
+    order: [['createdAt', 'DESC']],
+    limit: 50,
+  });
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    rating: r.rating,
+    date: r.createdAt ? new Date(r.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : null,
+    comment: r.comment || null,
+  }));
 };
 
 const hostBadge = async (j) => {

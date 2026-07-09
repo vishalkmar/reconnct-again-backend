@@ -39,6 +39,11 @@ const Booking = sequelize.define(
     // Set the moment the email reminder actually goes out — makes the sweep
     // idempotent (never double-sends) no matter how often it runs.
     reminderEmailSentAt: { type: DataTypes.DATE, allowNull: true },
+    // "Stop showing" on the auto rate-and-review popup — permanent for this
+    // ONE booking only; the manual "Rate" button on the booking card still
+    // works regardless. Shared truth for app + web so dismissing on one
+    // matches the other.
+    reviewPromptDismissed: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     // Convenience: nights = end - start for rooms; days for packages.
     units: {
       type: DataTypes.INTEGER,

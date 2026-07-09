@@ -297,6 +297,19 @@ Hotel.hasMany(Review, {
   scope: { entityType: 'hotel' },
   as: 'reviews',
 });
+Experience.hasMany(Review, {
+  foreignKey: 'entityId',
+  constraints: false,
+  scope: { entityType: 'experience' },
+  as: 'reviews',
+});
+
+// Experience reviews (only) additionally tie to the real User + the exact
+// completed Booking they were submitted for — one review per booking.
+Review.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+User.hasMany(Review, { foreignKey: 'userId', as: 'reviews' });
+Review.belongsTo(Booking, { foreignKey: 'bookingId', as: 'booking' });
+Booking.hasOne(Review, { foreignKey: 'bookingId', as: 'review' });
 
 // Testimonial <-> TestimonialMedia
 Testimonial.hasMany(TestimonialMedia, { foreignKey: 'testimonialId', as: 'media', onDelete: 'CASCADE' });
