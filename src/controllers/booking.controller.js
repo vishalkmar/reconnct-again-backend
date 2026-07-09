@@ -1,5 +1,5 @@
 const asyncHandler = require('express-async-handler');
-const { Booking, User } = require('../models');
+const { Booking, User, Review } = require('../models');
 const { ok, fail, created } = require('../utils/response');
 const {
   ALLOWED_TYPES,
@@ -85,6 +85,8 @@ const publicBooking = (booking) => {
     refundAmount: fromPaise(j.refundAmountPaise),
     refundStatus: j.refundStatus || 'none',
     cashfreeRefundId: j.cashfreeRefundId,
+    reviewPromptDismissed: !!j.reviewPromptDismissed,
+    review: j.review ? { id: j.review.id, rating: j.review.rating, comment: j.review.comment, createdAt: j.review.createdAt } : null,
     createdAt: j.createdAt,
     updatedAt: j.updatedAt,
   };
@@ -363,6 +365,7 @@ const listMine = asyncHandler(async (req, res) => {
 
   const rows = await Booking.findAll({
     where,
+    include: [{ model: Review, as: 'review', attributes: ['id', 'rating', 'comment', 'createdAt'], required: false }],
     order: [['createdAt', 'DESC']],
     limit: Math.min(parseInt(req.query.limit, 10) || 100, 200),
   });
@@ -376,6 +379,7 @@ const listMine = asyncHandler(async (req, res) => {
 const getMineByCode = asyncHandler(async (req, res) => {
   const booking = await Booking.findOne({
     where: { bookingCode: String(req.params.code), userId: req.user.id },
+    include: [{ model: Review, as: 'review', attributes: ['id', 'rating', 'comment', 'createdAt'], required: false }],
   });
   if (!booking) return fail(res, 'Booking not found', 404);
   return ok(res, { booking: publicBooking(booking) });
