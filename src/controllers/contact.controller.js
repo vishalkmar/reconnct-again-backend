@@ -2,9 +2,7 @@ const asyncHandler = require('express-async-handler');
 const { SiteSetting } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { send } = require('../pwa/services/mailer');
-
-const esc = (s) => String(s == null ? '' : s)
-  .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const { escapeHtml: esc, emailShell, kvTable } = require('../utils/emailLayout');
 
 // Where contact-form submissions are delivered. Prefer an explicit env, else
 // the first site-info email, else the signed-contract notify address.
@@ -32,16 +30,22 @@ const submit = asyncHandler(async (req, res) => {
   const to = await resolveRecipient();
   if (!to) return fail(res, 'Contact is not configured yet. Please email us directly.', 503);
 
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:20px;">
-      <h2 style="margin:0 0 12px;color:#0f766e;">New contact enquiry</h2>
-      <table style="border-collapse:collapse;font-size:14px;">
-        <tr><td style="padding:6px 12px;color:#6b7280;">Name</td><td style="padding:6px 12px;font-weight:600;">${esc(name)}</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Email</td><td style="padding:6px 12px;font-weight:600;">${esc(email)}</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Phone</td><td style="padding:6px 12px;font-weight:600;">${esc(phone) || '—'}</td></tr>
-      </table>
-      <p style="color:#374151;line-height:1.55;margin-top:14px;white-space:pre-wrap;">${esc(query)}</p>
-    </div>`;
+  const html = emailShell({
+    preheader: `New enquiry from ${name}`,
+    eyebrow: 'Contact form',
+    heading: 'New contact enquiry',
+    ribbonBg: '#101828',
+    ribbonFg: '#ffffff',
+    bodyHtml: `
+      ${kvTable([
+        ['Name', esc(name)],
+        ['Email', esc(email)],
+        ['Phone', esc(phone) || '—'],
+      ])}
+      <p style="color:#374151;line-height:1.6;margin-top:16px;white-space:pre-wrap;">${esc(query)}</p>
+    `,
+    footerNote: 'Reply directly to this email to respond to the sender.',
+  });
 
   try {
     await send({

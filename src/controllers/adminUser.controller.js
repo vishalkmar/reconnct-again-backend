@@ -6,6 +6,7 @@ const { fromPaise } = require('../services/booking.service');
 const { publicBooking } = require('./booking.controller');
 const { buildVoucherHtml } = require('../services/bookingEmail.service');
 const { send } = require('../pwa/services/mailer');
+const { emailShell } = require('../utils/emailLayout');
 
 // Shape returned for the list page — light, only what the table needs. The
 // aggregated counts come from a second grouped query (see `list`).
@@ -335,23 +336,13 @@ const sendEmail = asyncHandler(async (req, res) => {
   if (!user) return fail(res, 'User not found', 404);
   if (!user.email) return fail(res, 'User has no email on file', 400);
 
-  // Wrap in a minimal branded shell so the email looks consistent
+  // Wrap in the shared branded shell so the email looks consistent
   // regardless of what the admin pasted into the body editor.
-  const wrapped = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:24px 12px;">
-      <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:14px;overflow:hidden;box-shadow:0 4px 14px rgba(0,0,0,0.06);">
-        <div style="background:linear-gradient(135deg,#0f766e,#065f46);padding:18px 24px;color:#fff;font-weight:700;font-size:14px;letter-spacing:1px;text-transform:uppercase;">
-          Retreats by Traveon
-        </div>
-        <div style="padding:22px 26px;color:#0f172a;font-size:14px;line-height:1.6;">
-          ${html}
-        </div>
-        <div style="padding:14px 26px;background:#f8fafc;color:#64748b;font-size:12px;border-top:1px solid #eef2f7;">
-          Sent by Traveon support · Reply to this email and our team will respond.
-        </div>
-      </div>
-    </div>
-  `;
+  const wrapped = emailShell({
+    preheader: subject,
+    bodyHtml: `<div style="color:#101828;font-size:14px;line-height:1.6;">${html}</div>`,
+    footerNote: 'Sent by reconnct support · Reply to this email and our team will respond.',
+  });
 
   try {
     await send({ to: user.email, subject, html: wrapped, text });
@@ -388,35 +379,33 @@ const getVoucherHtml = asyncHandler(async (req, res) => {
   const booking = await Booking.findOne({ where: { userId: id, bookingCode: code } });
   if (!booking) return fail(res, 'Voucher not found for this user', 404);
 
-  const voucherBody = buildVoucherHtml(booking);
-  const fullPage = `<!doctype html>
-<html><head>
-  <meta charset="utf-8" />
-  <title>Voucher ${booking.bookingCode}</title>
-  <style>
+  // buildVoucherHtml() returns a complete <!doctype html> document (the same
+  // one that's emailed), so the print toolbar is injected into it rather than
+  // wrapping it in a second <html>/<body>.
+  const printStyle = `<style>
     @media print {
       .no-print { display: none !important; }
       body { background: #fff !important; }
     }
-    body { margin: 0; }
     .toolbar {
       position: sticky; top: 0; z-index: 10;
-      background: #0f172a; color: #fff;
+      background: #101828; color: #fff;
       display: flex; justify-content: space-between; align-items: center;
       padding: 10px 20px; font-family: system-ui, sans-serif; font-size: 13px;
     }
     .toolbar button {
-      background: #14b8a6; border: 0; color: #fff;
-      padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 600;
+      background: #F9B402; border: 0; color: #101010;
+      padding: 8px 14px; border-radius: 8px; cursor: pointer; font-weight: 700;
     }
-  </style>
-</head><body>
-  <div class="toolbar no-print">
+  </style>`;
+  const toolbar = `<div class="toolbar no-print">
     <span>Voucher · ${booking.bookingCode}</span>
     <button onclick="window.print()">Save / Print PDF</button>
-  </div>
-  ${voucherBody}
-</body></html>`;
+  </div>`;
+
+  const fullPage = buildVoucherHtml(booking)
+    .replace('</head>', `${printStyle}</head>`)
+    .replace(/<body([^>]*)>/, `<body$1>${toolbar}`);
 
   res.set('Content-Type', 'text/html; charset=utf-8');
   return res.send(fullPage);

@@ -13,6 +13,7 @@ const { getUploadedUrl } = require('../../utils/uploads');
 const { emitToProperty } = require('../services/socket');
 const { notifyUser } = require('../services/notifications');
 const { send, sendContract } = require('../services/mailer');
+const { emailShell, calloutBox } = require('../../utils/emailLayout');
 const { SECTION_KEY_SET, PROPERTY_STATUS, FIELD_DECISION } = require('../constants');
 
 // All routes here use authenticatePwa + requireRoles('officer') in the
@@ -326,18 +327,17 @@ const approveProperty = asyncHandler(async (req, res) => {
         await send({
           to: property.auditor.email,
           subject: `Property approved: ${property.name} (${property.propertyCode || property.id})`,
-          html: `
-            <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
-              <h2 style="margin:0 0 12px;color:#0f766e;">Property approved</h2>
-              <p style="color:#374151;line-height:1.55;">
+          html: emailShell({
+            preheader: `${property.name} has been approved`,
+            bodyHtml: `
+              <h2 style="margin:0 0 10px;color:#101828;font-size:19px;">Property approved</h2>
+              <p style="color:#374151;line-height:1.6;margin:0;">
                 The central officer has approved <strong>${property.name}</strong>.
                 You can now upload the contract PDF and send it to the property owner for e-signing.
               </p>
-              <div style="font-size:18px;font-weight:700;letter-spacing:2px;background:#f0fdfa;padding:14px 18px;text-align:center;border-radius:10px;color:#0f766e;margin:18px 0;">
-                Property ID: ${property.propertyCode || property.id}
-              </div>
-            </div>
-          `,
+              ${calloutBox('Property ID', property.propertyCode || property.id)}
+            `,
+          }),
           text: `Property approved: ${property.name}. You can now upload the contract PDF and send it to the owner for e-signing.`,
         });
       } catch (err) {

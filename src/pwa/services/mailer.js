@@ -1,13 +1,16 @@
 const http = require('http');
 const https = require('https');
 const nodemailer = require('nodemailer');
+const {
+  escapeHtml: esc, emailShell, codeBox, ctaButton, kvTable, calloutBox,
+} = require('../../utils/emailLayout');
 
 const FROM = () =>
   process.env.MAIL_FROM ||
   process.env.EMAIL_FROM ||
   process.env.SMTP_FROM ||
   process.env.BREVO_FROM ||
-  'Retreats by Traveon <no-reply@traveon.com>';
+  'reconnct <no-reply@reconnct.app>';
 
 // Provider-agnostic SMTP transport (nodemailer). Works with ANY provider —
 // Resend, SendGrid, Mailgun, Zoho, Gmail, or your own cPanel mailbox — using
@@ -182,39 +185,39 @@ const sendOtp = ({ to, code, purpose, role }) => {
     owner_login: 'access your property',
   }[purpose] || 'authenticate';
 
-  const subject = `Your Traveon Retreats verification code: ${code}`;
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;">
-      <h2 style="margin:0 0 12px;color:#0f766e;">Verification code</h2>
-      <p style="color:#374151;line-height:1.55;">
-        Use the code below to ${purposeLabel}${role ? ` as <strong>${role}</strong>` : ''}.
+  const subject = `Your reconnct verification code: ${code}`;
+  const html = emailShell({
+    preheader: `Your verification code is ${code}`,
+    bodyHtml: `
+      <h2 style="margin:0 0 10px;color:#101828;font-size:19px;">Verification code</h2>
+      <p style="color:#374151;line-height:1.6;margin:0;">
+        Use the code below to ${purposeLabel}${role ? ` as <strong>${esc(role)}</strong>` : ''}.
       </p>
-      <div style="font-size:32px;font-weight:700;letter-spacing:6px;background:#f0fdfa;padding:18px 24px;text-align:center;border-radius:10px;color:#0f766e;margin:18px 0;">
-        ${code}
-      </div>
-      <p style="color:#6b7280;font-size:13px;">This code expires in 10 minutes. If you didn't request it, you can ignore this email.</p>
-    </div>
-  `;
+      ${codeBox(code)}
+      <p style="color:#94a3b8;font-size:12px;margin:0;">This code expires in 10 minutes. If you didn't request it, you can safely ignore this email.</p>
+    `,
+  });
   return send({ to, subject, html, text: `Your code: ${code}` });
 };
 
 const sendInvite = ({ to, name, role, tempPassword, loginUrl }) => {
-  const subject = `Welcome to Traveon Retreats - your ${role} account is ready`;
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:520px;margin:0 auto;padding:24px;">
-      <h2 style="margin:0 0 12px;color:#0f766e;">Welcome${name ? `, ${name}` : ''}!</h2>
-      <p style="color:#374151;line-height:1.55;">
-        An administrator has created a <strong>${role}</strong> account for you in the
-        Traveon Retreats app. Use the credentials below to sign in.
+  const subject = `Welcome to reconnct — your ${role} account is ready`;
+  const html = emailShell({
+    preheader: `Your ${role} account is ready`,
+    bodyHtml: `
+      <h2 style="margin:0 0 10px;color:#101828;font-size:19px;">Welcome${name ? `, ${esc(name)}` : ''}!</h2>
+      <p style="color:#374151;line-height:1.6;margin:0 0 14px;">
+        An administrator has created a <strong>${esc(role)}</strong> account for you on
+        reconnct. Use the credentials below to sign in.
       </p>
-      <table style="border-collapse:collapse;margin:16px 0;">
-        <tr><td style="padding:6px 12px;color:#6b7280;">Email</td><td style="padding:6px 12px;font-weight:600;">${to}</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Temporary password</td><td style="padding:6px 12px;font-weight:600;font-family:monospace;">${tempPassword}</td></tr>
-      </table>
-      ${loginUrl ? `<p><a href="${loginUrl}" style="background:#0f766e;color:#fff;text-decoration:none;padding:12px 18px;border-radius:8px;display:inline-block;">Open the app</a></p>` : ''}
-      <p style="color:#6b7280;font-size:13px;margin-top:18px;">You will be asked to verify your email and change your password on first login.</p>
-    </div>
-  `;
+      ${kvTable([
+        ['Email', esc(to)],
+        ['Temporary password', `<span style="font-family:Menlo,Consolas,monospace;">${esc(tempPassword)}</span>`],
+      ])}
+      ${loginUrl ? ctaButton(loginUrl, 'Open the app') : ''}
+      <p style="color:#94a3b8;font-size:12px;margin-top:6px;">You will be asked to verify your email and change your password on first login.</p>
+    `,
+  });
   return send({ to, subject, html, text: `Welcome! Temp password: ${tempPassword}` });
 };
 
@@ -232,22 +235,21 @@ const sendContract = async ({
   instructions,
 }) => {
   const attachmentBuffer = pdfBuffer || (pdfUrl ? await downloadUrl(pdfUrl) : null);
-  const mailSubject = subject || `Contract for ${propertyName} (${propertyCode}) - Traveon Retreats`;
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
-      <h2 style="margin:0 0 12px;color:#0f766e;">${heading}</h2>
-      <p style="color:#374151;line-height:1.55;">
-        Hello${ownerName ? ` ${ownerName}` : ''}, ${intro || `your property <strong>${propertyName}</strong> has been approved.`}
+  const mailSubject = subject || `Contract for ${propertyName} (${propertyCode}) — reconnct`;
+  const html = emailShell({
+    preheader: `Your contract for ${propertyName} is ready`,
+    bodyHtml: `
+      <h2 style="margin:0 0 10px;color:#101828;font-size:19px;">${esc(heading)}</h2>
+      <p style="color:#374151;line-height:1.6;margin:0 0 10px;">
+        Hello${ownerName ? ` ${esc(ownerName)}` : ''}, ${intro || `your property <strong>${esc(propertyName)}</strong> has been approved.`}
       </p>
-      <p style="color:#374151;line-height:1.55;">
-        ${instructions || 'The contract is attached to this email as a PDF. Please print it, sign it, and upload the signed copy in the Traveon Retreats app using your Property ID below.'}
+      <p style="color:#374151;line-height:1.6;margin:0;">
+        ${instructions || 'The contract is attached to this email as a PDF. Please print it, sign it, and upload the signed copy in the reconnct app using your Property ID below.'}
       </p>
-      <div style="font-size:18px;font-weight:700;letter-spacing:2px;background:#f0fdfa;padding:14px 18px;text-align:center;border-radius:10px;color:#0f766e;margin:18px 0;">
-        Property ID: ${propertyCode}
-      </div>
-      <p style="color:#6b7280;font-size:13px;">If you have any questions, reply to this email.</p>
-    </div>
-  `;
+      ${calloutBox('Property ID', esc(propertyCode))}
+      <p style="color:#94a3b8;font-size:12px;margin:0;">If you have any questions, reply to this email.</p>
+    `,
+  });
   return send({
     to,
     subject: mailSubject,
@@ -286,23 +288,28 @@ const sendSignedContractNotification = async ({
       }))
     : null;
 
-  const subject = `Signed contract uploaded - ${propertyName} (${propertyCode})`;
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:620px;margin:0 auto;padding:24px;">
-      <h2 style="margin:0 0 12px;color:#0f766e;">Signed contract uploaded</h2>
-      <p style="color:#374151;line-height:1.55;">
+  const subject = `Signed contract uploaded — ${propertyName} (${propertyCode})`;
+  const html = emailShell({
+    preheader: `Signed contract uploaded for ${propertyName}`,
+    eyebrow: 'Contract update',
+    heading: 'Signed contract uploaded',
+    ribbonBg: '#101828',
+    ribbonFg: '#ffffff',
+    width: 620,
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
         The property owner has uploaded a signed contract. The file is attached to this email.
       </p>
-      <table style="border-collapse:collapse;margin:16px 0;width:100%;font-size:14px;">
-        <tr><td style="padding:6px 12px;color:#6b7280;">Property</td><td style="padding:6px 12px;font-weight:600;">${propertyName}</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Property ID</td><td style="padding:6px 12px;font-weight:600;">${propertyCode}</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Owner</td><td style="padding:6px 12px;font-weight:600;">${ownerName || '-'} &lt;${ownerEmail}&gt;</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Auditor</td><td style="padding:6px 12px;font-weight:600;">${auditor?.name || '-'}${auditor?.email ? ` &lt;${auditor.email}&gt;` : ''}</td></tr>
-        <tr><td style="padding:6px 12px;color:#6b7280;">Officer</td><td style="padding:6px 12px;font-weight:600;">${officer?.name || '-'}${officer?.email ? ` &lt;${officer.email}&gt;` : ''}</td></tr>
-      </table>
-      ${signedUrl ? `<p style="font-size:13px;color:#6b7280;">Backup link: <a href="${signedUrl}">${signedUrl}</a></p>` : ''}
-    </div>
-  `;
+      ${kvTable([
+        ['Property', esc(propertyName)],
+        ['Property ID', esc(propertyCode)],
+        ['Owner', `${esc(ownerName || '-')} &lt;${esc(ownerEmail)}&gt;`],
+        ['Auditor', `${esc(auditor?.name || '-')}${auditor?.email ? ` &lt;${esc(auditor.email)}&gt;` : ''}`],
+        ['Officer', `${esc(officer?.name || '-')}${officer?.email ? ` &lt;${esc(officer.email)}&gt;` : ''}`],
+      ])}
+      ${signedUrl ? `<p style="font-size:12px;color:#94a3b8;margin-top:14px;">Backup link: <a href="${esc(signedUrl)}" style="color:#b45309;">${esc(signedUrl)}</a></p>` : ''}
+    `,
+  });
 
   return send({
     to,
@@ -317,29 +324,27 @@ const sendSignedContractNotification = async ({
 // Sent to the owner once the signed contract lands and the property is
 // flipped to COMPLETED. Acts as the "your retreat is live" receipt.
 const sendListingConfirmation = ({ to, ownerName, propertyName, propertyCode }) => {
-  const subject = `${propertyName} is now live on Retreats by Traveon`;
-  const html = `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;">
-      <h2 style="margin:0 0 12px;color:#0f766e;">Your retreat is live</h2>
-      <p style="color:#374151;line-height:1.55;">
-        Hello${ownerName ? ` ${ownerName}` : ''}, we've received your signed contract
-        for <strong>${propertyName}</strong>. Onboarding is complete and your
-        property is now live on the Retreats by Traveon platform.
+  const subject = `${propertyName} is now live on reconnct`;
+  const html = emailShell({
+    preheader: `${propertyName} is now live`,
+    bodyHtml: `
+      <h2 style="margin:0 0 10px;color:#101828;font-size:19px;">Your retreat is live</h2>
+      <p style="color:#374151;line-height:1.6;margin:0;">
+        Hello${ownerName ? ` ${esc(ownerName)}` : ''}, we've received your signed contract
+        for <strong>${esc(propertyName)}</strong>. Onboarding is complete and your
+        property is now live on reconnct.
       </p>
-      <div style="font-size:18px;font-weight:700;letter-spacing:2px;background:#f0fdfa;padding:14px 18px;text-align:center;border-radius:10px;color:#0f766e;margin:18px 0;">
-        Property ID: ${propertyCode || '—'}
-      </div>
-      <p style="color:#6b7280;font-size:13px;">
-        You can manage availability and inquiries from the owner app at any
-        time. Welcome aboard!
+      ${calloutBox('Property ID', esc(propertyCode || '—'))}
+      <p style="color:#94a3b8;font-size:12px;margin:0;">
+        You can manage availability and inquiries from the owner app at any time. Welcome aboard!
       </p>
-    </div>
-  `;
+    `,
+  });
   return send({
     to,
     subject,
     html,
-    text: `${propertyName} (${propertyCode || ''}) is now live on Retreats by Traveon.`,
+    text: `${propertyName} (${propertyCode || ''}) is now live on reconnct.`,
   });
 };
 

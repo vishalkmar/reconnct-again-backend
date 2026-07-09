@@ -1,11 +1,9 @@
 const { send } = require('../pwa/services/mailer');
 const { fromPaise } = require('./booking.service');
 const { buildBookingVoucherPdf } = require('./bookingVoucherPdf.service');
-
-const escape = (val) =>
-  String(val ?? '').replace(/[&<>"']/g, (ch) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch])
-  );
+const {
+  escapeHtml: escape, emailShell, kvTable, calloutBox,
+} = require('../utils/emailLayout');
 
 const fmtMoney = (paise, currency = 'INR') => {
   const value = fromPaise(paise);
@@ -25,12 +23,14 @@ const typeLabel = (t) => ({
   room: 'Hotel Room',
   event: 'Event',
   addon: 'Add-on Activity',
+  experience: 'Experience',
 })[t] || 'Booking';
 
 /**
- * Build the voucher HTML embedded in the confirmation email. Kept as plain
- * inline styles (no external CSS) so it renders identically across Gmail,
- * Outlook, Apple Mail and the Brevo preview.
+ * Build the voucher HTML embedded in the confirmation email. Renders through
+ * the shared emailShell so it looks consistent with every other reconnct
+ * email (inline styles only — no external CSS — so it renders identically
+ * across Gmail, Outlook, Apple Mail and the Brevo preview).
  */
 const buildVoucherHtml = (booking) => {
   const item = booking.itemSnapshot || {};
@@ -55,63 +55,39 @@ const buildVoucherHtml = (booking) => {
   if (booking.walletDiscountPaise > 0) pricingRows.push(['Wallet credit', `− ${fmtMoney(booking.walletDiscountPaise, booking.currency)}`]);
   if (booking.couponDiscountPaise > 0) pricingRows.push([`Coupon ${booking.couponCode || ''}`.trim(), `− ${fmtMoney(booking.couponDiscountPaise, booking.currency)}`]);
 
-  return `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
-      <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-        <!-- Ribbon -->
-        <div style="background:linear-gradient(135deg,#0f766e,#065f46);padding:24px 28px;color:#fff;">
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.9;">Booking confirmed</div>
-          <div style="font-family:Menlo,Consolas,monospace;font-weight:700;font-size:22px;margin-top:4px;letter-spacing:1px;">${escape(booking.bookingCode)}</div>
-          <div style="font-size:12px;opacity:.9;margin-top:2px;">${escape(typeLabel(booking.itemType))}</div>
-        </div>
+  const bodyHtml = `
+    ${item.image ? `<img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#b45309;">${escape(typeLabel(booking.itemType))}</div>
+    <div style="font-size:20px;font-weight:800;color:#101828;margin:4px 0 4px;line-height:1.3;">${escape(item.name || 'Booking')}</div>
+    ${item.location ? `<div style="font-size:13px;color:#64748b;margin-bottom:16px;">📍 ${escape(item.location)}</div>` : '<div style="margin-bottom:8px;"></div>'}
 
-        <!-- Item card -->
-        <div style="padding:20px 28px;border-bottom:1px solid #eef2f7;">
-          ${item.image ? `
-            <img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;" />
-          ` : ''}
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#0f766e;">${escape(typeLabel(booking.itemType))}</div>
-          <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:4px;line-height:1.3;">${escape(item.name || 'Booking')}</div>
-          ${item.location ? `<div style="font-size:13px;color:#64748b;margin-top:4px;">📍 ${escape(item.location)}</div>` : ''}
-        </div>
+    ${kvTable(rows)}
 
-        <!-- Details -->
-        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;">
-          ${rows.map(([k, v]) => `
-            <tr>
-              <td style="padding:10px 28px;color:#64748b;font-size:13px;width:36%;border-bottom:1px solid #f1f5f9;">${escape(k)}</td>
-              <td style="padding:10px 28px;color:#0f172a;font-size:14px;font-weight:600;border-bottom:1px solid #f1f5f9;">${v}</td>
-            </tr>
-          `).join('')}
-        </table>
-
-        <!-- Pricing -->
-        <div style="padding:18px 28px;background:#f8fafc;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:8px;">Payment summary</div>
-          <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-size:13px;">
-            ${pricingRows.map(([k, v]) => `
-              <tr>
-                <td style="padding:4px 0;color:#475569;">${escape(k)}</td>
-                <td style="padding:4px 0;text-align:right;color:#0f172a;font-weight:500;">${v}</td>
-              </tr>
-            `).join('')}
-            <tr>
-              <td style="padding:10px 0 0 0;border-top:1px solid #e2e8f0;color:#0f172a;font-weight:700;font-size:15px;">Total paid</td>
-              <td style="padding:10px 0 0 0;border-top:1px solid #e2e8f0;text-align:right;color:#0f766e;font-weight:800;font-size:18px;">${fmtMoney(booking.totalPaise, booking.currency)}</td>
-            </tr>
-          </table>
-          ${booking.paymentId ? `<div style="font-size:11px;color:#64748b;margin-top:10px;">Payment reference: <span style="font-family:Menlo,Consolas,monospace;">${escape(booking.paymentId)}</span></div>` : ''}
-        </div>
-
-        <!-- Footer -->
-        <div style="padding:18px 28px;font-size:12px;color:#64748b;line-height:1.6;">
-          Keep this voucher handy — you'll need to show the booking code at check-in.
-          Need help? Just reply to this email and our team will get back to you.
-          <div style="margin-top:10px;">— Team Retreats by Traveon</div>
-        </div>
-      </div>
+    <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eef1f5;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:10px;">Payment summary</div>
+      <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-size:13px;">
+        ${pricingRows.map(([k, v]) => `
+          <tr>
+            <td style="padding:4px 0;color:#475569;">${escape(k)}</td>
+            <td style="padding:4px 0;text-align:right;color:#101828;font-weight:500;">${v}</td>
+          </tr>
+        `).join('')}
+        <tr>
+          <td style="padding:10px 0 0 0;border-top:1px solid #e2e8f0;color:#101828;font-weight:700;font-size:15px;">Total paid</td>
+          <td style="padding:10px 0 0 0;border-top:1px solid #e2e8f0;text-align:right;color:#b45309;font-weight:800;font-size:18px;">${fmtMoney(booking.totalPaise, booking.currency)}</td>
+        </tr>
+      </table>
+      ${booking.paymentId ? `<div style="font-size:11px;color:#94a3b8;margin-top:10px;">Payment reference: <span style="font-family:Menlo,Consolas,monospace;">${escape(booking.paymentId)}</span></div>` : ''}
     </div>
   `;
+
+  return emailShell({
+    preheader: `Your booking ${booking.bookingCode} is confirmed`,
+    eyebrow: 'Booking confirmed',
+    heading: `<span style="font-family:Menlo,Consolas,monospace;letter-spacing:1px;">${escape(booking.bookingCode)}</span>`,
+    bodyHtml,
+    footerNote: "Keep this voucher handy — you'll need to show the booking code at check-in. Need help? Just reply to this email and our team will get back to you.",
+  });
 };
 
 const sendBookingConfirmation = async ({ booking }) => {
@@ -161,47 +137,25 @@ const buildHostVoucherHtml = (booking, exp) => {
   ];
   if (booking.specialRequests) rows.push(['Special requests', escape(booking.specialRequests)]);
 
-  return `
-    <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
-      <div style="max-width:600px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-        <!-- Ribbon -->
-        <div style="background:#F9B402;padding:24px 28px;color:#101010;">
-          <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.8;">New booking on your listing</div>
-          <div style="font-family:Menlo,Consolas,monospace;font-weight:700;font-size:22px;margin-top:4px;letter-spacing:1px;">${escape(booking.bookingCode)}</div>
-        </div>
+  const bodyHtml = `
+    ${item.image ? `<img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Experience</div>
+    <div style="font-size:20px;font-weight:800;color:#101828;margin:4px 0 16px;line-height:1.3;">${escape(exp.name)}</div>
 
-        <!-- Item card -->
-        <div style="padding:20px 28px;border-bottom:1px solid #eef2f7;">
-          ${item.image ? `<img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:14px;" />` : ''}
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Experience</div>
-          <div style="font-size:20px;font-weight:700;color:#0f172a;margin-top:4px;line-height:1.3;">${escape(exp.name)}</div>
-        </div>
+    ${kvTable(rows)}
 
-        <!-- Details -->
-        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;">
-          ${rows.map(([k, v]) => `
-            <tr>
-              <td style="padding:10px 28px;color:#64748b;font-size:13px;width:36%;border-bottom:1px solid #f1f5f9;">${escape(k)}</td>
-              <td style="padding:10px 28px;color:#0f172a;font-size:14px;font-weight:600;border-bottom:1px solid #f1f5f9;">${v}</td>
-            </tr>
-          `).join('')}
-        </table>
-
-        <!-- Base amount only -->
-        <div style="padding:18px 28px;background:#f8fafc;">
-          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:6px;">Base amount</div>
-          <div style="font-size:22px;font-weight:800;color:#0f766e;">${baseAmount}</div>
-          <div style="font-size:11px;color:#94a3b8;margin-top:4px;">Excludes GST and platform convenience fee.</div>
-        </div>
-
-        <!-- Footer -->
-        <div style="padding:18px 28px;font-size:12px;color:#64748b;line-height:1.6;">
-          Open the reconnct app → Switch to Hosting → My Listings → ${escape(exp.name)} to see this booking and everyone else who's booked.
-          <div style="margin-top:10px;">— Team reconnct</div>
-        </div>
-      </div>
+    <div style="margin-top:20px;">
+      ${calloutBox('Base amount', baseAmount, 'Excludes GST and platform convenience fee.')}
     </div>
   `;
+
+  return emailShell({
+    preheader: `New booking on ${exp.name} — ${booking.bookingCode}`,
+    eyebrow: 'New booking on your listing',
+    heading: `<span style="font-family:Menlo,Consolas,monospace;letter-spacing:1px;">${escape(booking.bookingCode)}</span>`,
+    bodyHtml,
+    footerNote: `Open the reconnct app → Switch to Hosting → My Listings → ${escape(exp.name)} to see this booking and everyone else who's booked.`,
+  });
 };
 
 /**
@@ -234,25 +188,22 @@ const notifyHostOfBooking = async ({ booking }) => {
 };
 
 // Shared little reminder card (guest or host wording swapped by the caller).
-const buildReminderHtml = ({ heading, lead, itemName, itemImage, itemLocation, scheduleLine, extraRows = [] }) => `
-  <div style="font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f5f6f8;padding:32px 12px;">
-    <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 16px rgba(0,0,0,0.08);">
-      <div style="background:#F9B402;padding:22px 28px;color:#101010;">
-        <div style="font-size:11px;letter-spacing:2px;text-transform:uppercase;opacity:.8;">${escape(heading)}</div>
-        <div style="font-weight:800;font-size:18px;margin-top:4px;">${escape(itemName)}</div>
-      </div>
-      <div style="padding:22px 28px;">
-        <p style="color:#374151;line-height:1.6;margin:0 0 14px;">${lead}</p>
-        <table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;border-collapse:collapse;font-size:14px;">
-          <tr><td style="padding:6px 0;color:#6b7280;width:36%;">When</td><td style="padding:6px 0;font-weight:700;color:#0f172a;">${scheduleLine}</td></tr>
-          ${itemLocation ? `<tr><td style="padding:6px 0;color:#6b7280;">Location</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${escape(itemLocation)}</td></tr>` : ''}
-          ${extraRows.map(([k, v]) => `<tr><td style="padding:6px 0;color:#6b7280;">${escape(k)}</td><td style="padding:6px 0;font-weight:600;color:#0f172a;">${v}</td></tr>`).join('')}
-        </table>
-      </div>
-      ${itemImage ? `<img src="${escape(itemImage)}" alt="" style="width:100%;max-height:180px;object-fit:cover;" />` : ''}
-    </div>
-  </div>
-`;
+const buildReminderHtml = ({
+  heading, lead, itemName, itemImage, itemLocation, scheduleLine, extraRows = [],
+}) => emailShell({
+  preheader: lead.replace(/<[^>]+>/g, ''),
+  eyebrow: heading,
+  heading: escape(itemName),
+  bodyHtml: `
+    ${itemImage ? `<img src="${escape(itemImage)}" alt="" style="width:100%;max-height:180px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
+    <p style="color:#374151;line-height:1.6;margin:0 0 16px;">${lead}</p>
+    ${kvTable([
+      ['When', scheduleLine],
+      itemLocation ? ['Location', escape(itemLocation)] : null,
+      ...extraRows,
+    ])}
+  `,
+});
 
 const scheduleLineFor = (booking) => {
   const timeMatch = String(booking.specialRequests || '').match(/(\d{1,2}:\d{2}\s*(?:AM|PM))/i);
@@ -261,8 +212,8 @@ const scheduleLineFor = (booking) => {
 };
 
 /**
- * "Starting soon" reminder to the GUEST — fired twice per confirmed booking
- * (12h before, then 2h before) by the reminder sweep in reminder.service.js.
+ * "Starting soon" reminder to the GUEST — fired once per confirmed booking
+ * (6h before) by the reminder sweep in reminder.service.js.
  */
 const sendGuestReminder = async ({ booking, hoursBefore }) => {
   if (!booking?.guestEmail) return;
@@ -284,7 +235,9 @@ const sendGuestReminder = async ({ booking, hoursBefore }) => {
 /**
  * Same reminder for the HOST — "your listing has a guest coming up".
  */
-const sendHostReminder = async ({ booking, exp, host, hoursBefore }) => {
+const sendHostReminder = async ({
+  booking, exp, host, hoursBefore,
+}) => {
   if (!host?.email) return;
   const subject = `Reminder: ${exp.name} in ${hoursBefore} hours — guest ${booking.guestName || 'Guest'}`;
   const html = buildReminderHtml({
