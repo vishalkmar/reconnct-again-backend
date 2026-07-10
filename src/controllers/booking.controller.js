@@ -51,6 +51,10 @@ const publicBooking = (booking) => {
     item: j.itemSnapshot,
     scheduledFor: j.scheduledFor,
     scheduledEndAt: j.scheduledEndAt,
+    // Full timestamp (date-only scheduledFor/scheduledEndAt above can't tell
+    // "already happened today" from "later today") — the client-side
+    // completed check needs this to agree with the backend's isCompletedNow.
+    scheduledAt: j.scheduledAt,
     units: j.units,
     guest: {
       name: j.guestName,

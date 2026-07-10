@@ -212,6 +212,64 @@ const removeExperienceReview = asyncHandler(async (req, res) => {
   return ok(res, {}, 'Review deleted');
 });
 
+// ── Trend bucketing (reviews-over-time chart) ──────────────────────────────
+// Same day/week/month heuristic as the revenue analytics controller: pick the
+// coarseness from how wide the visible range is, so a "Today" filter doesn't
+// render 365 empty month buckets and a "This year" filter doesn't render 365
+// day buckets.
+const pad2 = (n) => String(n).padStart(2, '0');
+const dstr = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+const monthKey = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}`;
+const mondayOf = (input) => {
+  const x = new Date(input);
+  const day = (x.getDay() + 6) % 7;
+  x.setDate(x.getDate() - day);
+  x.setHours(0, 0, 0, 0);
+  return x;
+};
+
+const buildTrend = (rows, where) => {
+  if (!rows.length) return [];
+  const times = rows.map((r) => new Date(r.createdAt).getTime());
+  const start = where.createdAt?.[Op.gte] ? new Date(where.createdAt[Op.gte]) : new Date(Math.min(...times));
+  const end = where.createdAt?.[Op.lte] ? new Date(where.createdAt[Op.lte]) : new Date(Math.max(...times));
+  const spanDays = Math.max(1, (end - start) / 86400000);
+  const interval = spanDays <= 31 ? 'day' : spanDays <= 120 ? 'week' : 'month';
+
+  const bucketOf = (d) => {
+    const dt = new Date(d);
+    if (interval === 'month') return monthKey(dt);
+    if (interval === 'week') return dstr(mondayOf(dt));
+    return dstr(dt);
+  };
+
+  const buckets = [];
+  if (interval === 'month') {
+    let y = start.getFullYear(); let m = start.getMonth();
+    const ey = end.getFullYear(); const em = end.getMonth();
+    while (y < ey || (y === ey && m <= em)) { buckets.push(`${y}-${pad2(m + 1)}`); m++; if (m > 11) { m = 0; y++; } }
+  } else if (interval === 'week') {
+    let cur = mondayOf(start); const last = mondayOf(end);
+    while (cur <= last) { buckets.push(dstr(cur)); cur = new Date(cur); cur.setDate(cur.getDate() + 7); }
+  } else {
+    let cur = new Date(start); cur.setHours(0, 0, 0, 0);
+    const last = new Date(end); last.setHours(0, 0, 0, 0);
+    while (cur <= last) { buckets.push(dstr(cur)); cur = new Date(cur); cur.setDate(cur.getDate() + 1); }
+  }
+
+  const slot = new Map(buckets.map((bk) => [bk, { count: 0, ratingSum: 0 }]));
+  rows.forEach((r) => {
+    const bk = bucketOf(r.createdAt);
+    const s = slot.get(bk);
+    if (s) { s.count += 1; s.ratingSum += r.rating || 0; }
+  });
+
+  return buckets.map((bk) => {
+    const s = slot.get(bk);
+    return { bucket: bk, count: s.count, averageRating: s.count ? Number((s.ratingSum / s.count).toFixed(2)) : 0 };
+  });
+};
+
 // GET /api/admin/experience-reviews/analytics  (authenticate)
 const analytics = asyncHandler(async (req, res) => {
   const where = await resolveFilters(req.query);
@@ -224,20 +282,31 @@ const analytics = asyncHandler(async (req, res) => {
   rows.forEach((r) => { if (distribution[r.rating] != null) distribution[r.rating] += 1; });
 
   const byExperience = new Map();
-  rows.forEach((r) => byExperience.set(r.entityId, (byExperience.get(r.entityId) || 0) + 1));
-  let topExperience = null;
-  if (byExperience.size) {
-    const [topId, topCount] = [...byExperience.entries()].sort((a, b) => b[1] - a[1])[0];
-    const exp = await Experience.findByPk(topId, { attributes: ['id', 'name'] });
-    topExperience = exp ? { id: exp.id, name: exp.name, reviewCount: topCount } : null;
-  }
+  rows.forEach((r) => {
+    const cur = byExperience.get(r.entityId) || { count: 0, ratingSum: 0 };
+    cur.count += 1; cur.ratingSum += r.rating || 0;
+    byExperience.set(r.entityId, cur);
+  });
+  const ranked = [...byExperience.entries()].sort((a, b) => b[1].count - a[1].count).slice(0, 8);
+  const rankedExperiences = ranked.length
+    ? await Experience.findAll({ where: { id: ranked.map(([id]) => id) }, attributes: ['id', 'name'] })
+    : [];
+  const expNameById = new Map(rankedExperiences.map((e) => [e.id, e.name]));
+  const topExperiences = ranked.map(([id, v]) => ({
+    id,
+    name: expNameById.get(id) || `Experience #${id}`,
+    reviewCount: v.count,
+    averageRating: Number((v.ratingSum / v.count).toFixed(2)),
+  }));
 
   return ok(res, {
     totalReviews,
     totalRatings: totalReviews,
     averageRating: Number(averageRating.toFixed(2)),
     distribution,
-    topExperience,
+    topExperience: topExperiences[0] || null,
+    topExperiences,
+    trend: buildTrend(rows, where),
   });
 });
 

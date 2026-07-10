@@ -16,11 +16,13 @@ const toYMD = (d) => {
 };
 
 // Booking status → the host card's upcoming | completed | cancelled buckets.
+// Time-based, same rule as experienceReview.controller.js's isCompletedNow —
+// prefer the exact scheduledAt timestamp over the date-only scheduledFor so a
+// booking scheduled earlier today already reads as completed, not tomorrow.
 const hostBookingStatus = (b) => {
   if (b.status === 'cancelled' || b.status === 'refunded') return 'cancelled';
-  const endIso = b.scheduledEndAt || b.scheduledFor;
-  const today = new Date(); today.setHours(0, 0, 0, 0);
-  const past = endIso ? new Date(endIso) < today : false;
+  const endIso = b.scheduledEndAt || b.scheduledAt || b.scheduledFor;
+  const past = endIso ? new Date(endIso).getTime() <= Date.now() : false;
   if (b.status === 'completed' || (b.status === 'confirmed' && past)) return 'completed';
   return 'upcoming';
 };
