@@ -169,7 +169,10 @@ const buildBookingVoucherPdf = async (bookingRow, opts = {}) => {
     });
     page.drawLine({ start: { x: ML + 12, y: py + 6 }, end: { x: PAGE_W - MR - 12, y: py + 6 }, thickness: 1, color: LINE });
     py -= 12;
-    text('Total paid', ML + 12, py, { size: 12, bold: true });
+    // Only say "Total paid" once money has actually moved — a pending/failed
+    // booking's voucher must never claim it was paid.
+    const totalLabel = b.paidAt ? 'Total paid' : (b.status === 'cancelled' || b.status === 'refunded') ? 'Total' : 'Total payable';
+    text(totalLabel, ML + 12, py, { size: 12, bold: true });
     const totalStr = fmtMoney(b.totalPaise, currency);
     text(totalStr, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(totalStr), 14), py, { size: 14, bold: true, color: rgb(0.06, 0.46, 0.43) });
   }
