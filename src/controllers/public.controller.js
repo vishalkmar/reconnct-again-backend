@@ -17,7 +17,7 @@ const cashfree = require('../services/cashfree.service');
 const INCLUDE = [
   { model: ExperienceCategory, as: 'category', attributes: ['id', 'name', 'slug', 'icon', 'colorHex'] },
   { model: ExperienceType, as: 'type', attributes: ['id', 'name', 'slug', 'categoryId'] },
-  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'image'] },
+  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'image', 'phone'] },
 ];
 
 // pricing.adultPrice is the headline "from" price; the unit comes from priceMethod.
@@ -152,11 +152,11 @@ const realReviews = async (experienceId) => {
 
 const hostBadge = async (j) => {
   if (j.ownerUserId) {
-    const owner = await User.findByPk(j.ownerUserId, { attributes: ['id', 'name', 'company', 'avatarUrl'] });
-    if (owner) return { id: owner.id, name: owner.company || owner.name || 'Host', image: owner.avatarUrl || null, verified: true };
+    const owner = await User.findByPk(j.ownerUserId, { attributes: ['id', 'name', 'company', 'avatarUrl', 'phone'] });
+    if (owner) return { id: owner.id, name: owner.company || owner.name || 'Host', image: owner.avatarUrl || null, phone: owner.phone || null, verified: true };
   }
   return (j.showSupplierPublic !== false && j.supplier)
-    ? { id: j.supplier.id, name: j.supplier.supplierName || j.supplier.companyName, image: j.supplier.image }
+    ? { id: j.supplier.id, name: j.supplier.supplierName || j.supplier.companyName, image: j.supplier.image, phone: j.supplier.phone || null }
     : null;
 };
 
