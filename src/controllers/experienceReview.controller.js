@@ -49,6 +49,8 @@ const pendingReview = asyncHandler(async (req, res) => {
       bookingCode: due.bookingCode,
       itemName: item.name || 'Your experience',
       itemImage: item.image || null,
+      itemLocation: item.location || null,
+      scheduledFor: due.scheduledAt || due.scheduledFor || null,
     },
   });
 });
