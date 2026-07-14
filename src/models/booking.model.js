@@ -100,6 +100,15 @@ const Booking = sequelize.define(
       allowNull: true,
       comment: 'Last raw Cashfree payload — useful for support / refunds',
     },
+    // Set the moment we get an authoritative signal that a Cashfree order/link
+    // is terminally dead (EXPIRED/TERMINATED/CANCELLED) or the webhook reports
+    // a failure/user-dropped event — while `status` stays 'pending_payment' so
+    // the user can still retry the SAME booking. Cleared automatically the
+    // moment a later attempt actually succeeds. This is what lets the
+    // Transactions tab distinguish "still trying" (Pending) from "gave up /
+    // gateway rejected it" (Failed) without ever losing the retry path.
+    paymentFailedAt: { type: DataTypes.DATE, allowNull: true },
+    lastPaymentStatus: { type: DataTypes.STRING(40), allowNull: true },
 
     cancelledAt: { type: DataTypes.DATE, allowNull: true },
     cancellationReason: { type: DataTypes.STRING(255), allowNull: true },

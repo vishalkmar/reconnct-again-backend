@@ -141,6 +141,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migratePaymentFailure } = require('./scripts/migratePaymentFailure');
+    const result = await migratePaymentFailure();
+    if (result.changes?.length) {
+      console.log(`[DB] Payment failure schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Payment failure migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migrateExperienceTaxonomyArrays } = require('./scripts/migrateExperienceTaxonomyArrays');
     const result = await migrateExperienceTaxonomyArrays();
     if (result.changes?.length) {

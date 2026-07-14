@@ -29,6 +29,25 @@ const appUrl = () => {
 
 const isFinal = (status) => ['confirmed', 'completed', 'cancelled', 'refunded'].includes(status);
 
+// Terminal-dead order/link states — the attempt is over and will never turn
+// into a payment on its own (as opposed to ACTIVE/PENDING, which might still
+// resolve). Cashfree orders use one vocabulary, payment links a slightly
+// different one, so we keep two small lists rather than one shared guess.
+const ORDER_FAILED_STATUSES = ['EXPIRED', 'TERMINATED', 'TERMINATION_REQUESTED'];
+const LINK_FAILED_STATUSES = ['EXPIRED', 'CANCELLED'];
+
+// Records "this attempt is dead" without ever touching `status` — the booking
+// stays at pending_payment so the same booking can still be retried. Never
+// clobbers a booking that's already reached a final status (e.g. a stray late
+// webhook for an order that was superseded by a later successful attempt).
+const markPaymentFailed = async (booking, statusLabel) => {
+  if (!booking || booking.status !== 'pending_payment') return;
+  if (booking.paymentFailedAt && booking.lastPaymentStatus === statusLabel) return;
+  booking.paymentFailedAt = new Date();
+  booking.lastPaymentStatus = statusLabel || null;
+  await booking.save();
+};
+
 // Promote a booking to "confirmed" the first time we see a paid Cashfree
 // order for it. Subsequent calls are no-ops, which is critical because both
 // the return-URL handler AND the webhook may fire (and sometimes the webhook
@@ -53,6 +72,10 @@ const confirmBookingFromCashfree = async (booking, cfOrder) => {
   booking.paymentMethod = latest?.payment_group || latest?.payment_method?.payment_method || booking.paymentMethod;
   booking.paidAt = latest?.payment_time ? new Date(latest.payment_time) : new Date();
   booking.paymentRaw = cfOrder;
+  // A successful payment retracts any earlier failed-attempt marker on this
+  // same booking — it's paid now, it was never really "Failed".
+  booking.paymentFailedAt = null;
+  booking.lastPaymentStatus = null;
   await booking.save();
 
   // Fire-and-forget email so a flaky SMTP doesn't make a successful payment
@@ -84,6 +107,10 @@ const confirmBookingFromLink = async (booking, link) => {
   booking.paymentMethod = 'cashfree_link';
   booking.paidAt = new Date();
   booking.paymentRaw = link;
+  // A successful payment retracts any earlier failed-attempt marker on this
+  // same booking — it's paid now, it was never really "Failed".
+  booking.paymentFailedAt = null;
+  booking.lastPaymentStatus = null;
   await booking.save();
 
   // Voucher / confirmation email — fire-and-forget so a flaky SMTP never makes
@@ -168,7 +195,7 @@ const bookingLinkStatus = asyncHandler(async (req, res) => {
     return ok(res, { paid: true, booking: publicBooking(booking) });
   }
   if (!cfConfigured() || !booking.paymentOrderId) {
-    return ok(res, { paid: false, booking: publicBooking(booking) });
+    return ok(res, { paid: false, failed: false, booking: publicBooking(booking) });
   }
 
   try {
@@ -178,7 +205,13 @@ const bookingLinkStatus = asyncHandler(async (req, res) => {
       await booking.reload();
       return ok(res, { paid: true, booking: publicBooking(booking) });
     }
-    return ok(res, { paid: false, booking: publicBooking(booking), linkStatus: link?.link_status || null });
+    const linkStatus = link?.link_status || null;
+    const failed = LINK_FAILED_STATUSES.includes(String(linkStatus || '').toUpperCase());
+    if (failed) {
+      await markPaymentFailed(booking, linkStatus);
+      await booking.reload();
+    }
+    return ok(res, { paid: false, failed, booking: publicBooking(booking), linkStatus });
   } catch (err) {
     console.error('[payment] link-status failed:', err.message, err.body || '');
     return fail(res, 'Could not check payment status. Please try again in a moment.', 502);
@@ -277,10 +310,17 @@ const verifyBookingPayment = asyncHandler(async (req, res) => {
       await booking.reload();
       return ok(res, { booking: publicBooking(booking), paid: true });
     }
+    const orderStatus = cfOrder?.order_status || null;
+    const failed = ORDER_FAILED_STATUSES.includes(String(orderStatus || '').toUpperCase());
+    if (failed) {
+      await markPaymentFailed(booking, orderStatus);
+      await booking.reload();
+    }
     return ok(res, {
       booking: publicBooking(booking),
       paid: false,
-      cfOrderStatus: cfOrder?.order_status || null,
+      failed,
+      cfOrderStatus: orderStatus,
     });
   } catch (err) {
     console.error('[payment] verify failed:', err.message, err.body || '');
@@ -325,8 +365,10 @@ const webhook = asyncHandler(async (req, res) => {
     if (eventType.includes('SUCCESS') || cfIsPaid(cfOrder)) {
       await confirmBookingFromCashfree(booking, cfOrder);
     } else if (eventType.includes('FAIL') || eventType.includes('USER_DROPPED')) {
-      // Don't change status — leave at pending_payment so the user can retry.
-      // We only log payment failures here for debugging.
+      // Don't change `status` — leave at pending_payment so the user can
+      // retry the same booking. Just record that this attempt is dead so the
+      // Transactions tab can show it as Failed instead of stuck Pending.
+      await markPaymentFailed(booking, eventType);
       console.log('[payment] webhook payment failure for', orderId, eventType);
     }
   } catch (err) {

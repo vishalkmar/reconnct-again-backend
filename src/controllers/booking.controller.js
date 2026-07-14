@@ -81,6 +81,14 @@ const publicBooking = (booking) => {
       paymentId: j.paymentId,
       method: j.paymentMethod,
       paidAt: j.paidAt,
+      // Set only while status is still 'pending_payment' — a terminally dead
+      // Cashfree attempt (webhook FAIL/USER_DROPPED, or an EXPIRED/TERMINATED/
+      // CANCELLED order or link) without the booking having been paid yet.
+      // Cleared automatically the moment a retry succeeds. Lets clients show
+      // a distinct "Failed" transaction instead of leaving it stuck at
+      // "Pending" forever.
+      failedAt: j.paymentFailedAt,
+      lastStatus: j.lastPaymentStatus,
     },
     cancelledAt: j.cancelledAt,
     cancellationReason: j.cancellationReason,
