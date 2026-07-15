@@ -61,6 +61,7 @@ const list = asyncHandler(async (req, res) => {
         id: `h${j.id}`,
         kind: 'host_booking',
         bookingId: j.id,
+        bookingCode: j.bookingCode,
         title: 'New booking on your listing',
         body: `${listingName} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
         // Base amount — matches the voucher email; never the guest's full
@@ -72,6 +73,9 @@ const list = asyncHandler(async (req, res) => {
         feed.push({
           id: `hr${j.id}`,
           kind: 'reminder',
+          bookingId: j.id,
+          bookingCode: j.bookingCode,
+          isHostBooking: true,
           title: 'Booking in 1 hour',
           body: `${listingName} — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
           at: new Date().toISOString(),
@@ -90,6 +94,7 @@ const list = asyncHandler(async (req, res) => {
       id: `b${j.id}`,
       kind: 'booking',
       status: j.status,
+      bookingCode: j.bookingCode,
       title: cancelled ? 'Booking cancelled' : paid ? 'Booking confirmed' : 'Booking pending payment',
       body: `${title} — #${j.bookingCode}`,
       amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
@@ -99,6 +104,7 @@ const list = asyncHandler(async (req, res) => {
       feed.push({
         id: `r${j.id}`,
         kind: 'reminder',
+        bookingCode: j.bookingCode,
         title: 'Starting in 1 hour',
         body: `${title} — don't forget!`,
         at: new Date().toISOString(),
