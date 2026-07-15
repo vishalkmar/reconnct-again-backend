@@ -19,7 +19,7 @@ const getApp = () => {
   if (!isConfigured()) return null;
   try {
     const credentials = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    app = admin.initializeApp({ credential: admin.credential.cert(credentials) });
+    app = admin.initializeApp({ credential: admin.cert(credentials) });
     return app;
   } catch (err) {
     console.warn('[FIREBASE] FIREBASE_SERVICE_ACCOUNT is set but invalid JSON — push disabled:', err.message);

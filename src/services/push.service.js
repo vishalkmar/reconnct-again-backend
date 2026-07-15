@@ -1,3 +1,4 @@
+const { getMessaging } = require('firebase-admin/messaging');
 const { getApp, isConfigured } = require('../config/firebaseAdmin');
 const { User } = require('../models');
 
@@ -27,7 +28,7 @@ const sendPushToUser = async (userId, { title, body, data } = {}) => {
     const app = getApp();
     if (!app) return;
 
-    await app.messaging().send({
+    await getMessaging(app).send({
       token: user.fcmToken,
       notification: { title, body },
       data: stringifyData(data),
