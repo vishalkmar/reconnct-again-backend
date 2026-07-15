@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { Booking, Experience, User } = require('../models');
 const { sendGuestReminder, sendHostReminder } = require('./bookingEmail.service');
+const { sendPushToUser } = require('./push.service');
 
 /*
   Booking reminder sweep — a single "starting in 6 hours" EMAIL to both the
@@ -34,6 +35,12 @@ const runWave = async ({ hoursBefore, field }) => {
       console.error('[reminder] guest email failed:', err.message);
     }
 
+    sendPushToUser(booking.userId, {
+      title: 'Upcoming experience',
+      body: `${booking.itemSnapshot?.name || 'Your experience'} starts in about ${hoursBefore} hour${hoursBefore === 1 ? '' : 's'}.`,
+      data: { kind: 'reminder', bookingCode: booking.bookingCode, isHostBooking: 'false' },
+    }).catch(() => {});
+
     if (booking.itemType === 'experience') {
       try {
         // eslint-disable-next-line no-await-in-loop
@@ -41,8 +48,15 @@ const runWave = async ({ hoursBefore, field }) => {
         if (exp && exp.ownerUserId) {
           // eslint-disable-next-line no-await-in-loop
           const host = await User.findByPk(exp.ownerUserId);
-          // eslint-disable-next-line no-await-in-loop
-          if (host) await sendHostReminder({ booking, exp, host, hoursBefore });
+          if (host) {
+            // eslint-disable-next-line no-await-in-loop
+            await sendHostReminder({ booking, exp, host, hoursBefore });
+            sendPushToUser(host.id, {
+              title: 'Upcoming booking',
+              body: `${exp.name || 'Your listing'} has a guest arriving in about ${hoursBefore} hour${hoursBefore === 1 ? '' : 's'}.`,
+              data: { kind: 'reminder', bookingId: booking.id, isHostBooking: 'true' },
+            }).catch(() => {});
+          }
         }
       } catch (err) {
         console.error('[reminder] host email failed:', err.message);

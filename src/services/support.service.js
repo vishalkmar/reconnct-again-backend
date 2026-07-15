@@ -1,5 +1,6 @@
 const { Op } = require('sequelize');
 const { SupportConversation, SupportMessage } = require('../models');
+const { sendPushToUser } = require('./push.service');
 
 // Shared support-chat DB logic used by BOTH the REST controller and the socket
 // namespace so the two paths stay consistent. This module has no socket
@@ -119,6 +120,18 @@ const createMessage = async ({ conv, senderRole, senderUserId = null, senderAdmi
   else conv.unreadAdmin = (conv.unreadAdmin || 0) + 1;
   conv.status = 'open';
   await conv.save();
+
+  // Only the party carries a mobile device — an admin reply is the one
+  // direction that needs a push; the party's own messages just go to the
+  // admin dashboard (web-only, no FCM token to send to).
+  if (senderRole === 'admin' && conv.userId) {
+    sendPushToUser(conv.userId, {
+      title: 'New message from Support',
+      body: preview(body, attachments) || 'You have a new reply.',
+      data: { kind: 'support', queue: conv.queue },
+    }).catch(() => {});
+  }
+
   return msg;
 };
 

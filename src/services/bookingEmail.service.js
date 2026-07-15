@@ -1,6 +1,7 @@
 const { send } = require('../pwa/services/mailer');
 const { fromPaise } = require('./booking.service');
 const { buildBookingVoucherPdf } = require('./bookingVoucherPdf.service');
+const { sendPushToUser } = require('./push.service');
 const {
   escapeHtml: escape, emailShell, kvTable, calloutBox,
 } = require('../utils/emailLayout');
@@ -170,7 +171,15 @@ const notifyHostOfBooking = async ({ booking }) => {
   const exp = await Experience.findByPk(booking.itemId);
   if (!exp || !exp.ownerUserId) return;
   const host = await User.findByPk(exp.ownerUserId);
-  if (!host || !host.email) return;
+  if (!host) return;
+
+  sendPushToUser(host.id, {
+    title: 'New booking!',
+    body: `${booking.guestName || 'A guest'} just booked ${exp.name}.`,
+    data: { kind: 'host_booking', bookingId: booking.id, isHostBooking: 'true' },
+  }).catch(() => {});
+
+  if (!host.email) return;
 
   const subject = `New booking on ${exp.name} — ${booking.bookingCode}`;
   const html = buildHostVoucherHtml(booking, exp);

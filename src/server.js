@@ -151,6 +151,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migratePushTokens } = require('./scripts/migratePushTokens');
+    const result = await migratePushTokens();
+    if (result.changes?.length) {
+      console.log(`[DB] Push token schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Push token migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migrateExperienceTaxonomyArrays } = require('./scripts/migrateExperienceTaxonomyArrays');
     const result = await migrateExperienceTaxonomyArrays();
     if (result.changes?.length) {

@@ -3,7 +3,7 @@ const { Op } = require('sequelize');
 const {
   Booking, WalletTransaction, User, Experience,
 } = require('../models');
-const { ok } = require('../utils/response');
+const { ok, fail } = require('../utils/response');
 
 /*
   Notifications feed — the SINGLE source of truth for both the mobile app and
@@ -143,4 +143,15 @@ const list = asyncHandler(async (req, res) => {
   return ok(res, { notifications: feed, count: feed.length });
 });
 
-module.exports = { list };
+// POST /api/notifications/fcm-token  { fcmToken, platform } — registers/
+// refreshes this device's push token against the signed-in account. One
+// token per user: traveller and host mode are the same account, so a single
+// registration covers push for both.
+const registerToken = asyncHandler(async (req, res) => {
+  const { fcmToken } = req.body || {};
+  if (!fcmToken || typeof fcmToken !== 'string') return fail(res, 'fcmToken is required', 400);
+  await User.update({ fcmToken }, { where: { id: req.user.id } });
+  return ok(res, {}, 'Registered');
+});
+
+module.exports = { list, registerToken };

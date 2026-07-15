@@ -45,6 +45,11 @@ const User = sequelize.define(
 
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
+
+    // Device push token for the mobile app (one per account — traveller and
+    // host mode are the same User row, so a single token covers both).
+    // Overwritten on every login/refresh; the latest write wins.
+    fcmToken: { type: DataTypes.STRING(255), allowNull: true },
   },
   {
     tableName: 'users',

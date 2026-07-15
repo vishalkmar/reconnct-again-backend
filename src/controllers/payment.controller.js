@@ -15,6 +15,7 @@ const {
 } = require('../services/cashfree.service');
 const { sendBookingConfirmation, notifyHostOfBooking } = require('../services/bookingEmail.service');
 const { creditReferrerForFirstPaid } = require('../services/referEarn.service');
+const { sendPushToUser } = require('../services/push.service');
 const { publicBooking } = require('./booking.controller');
 
 const clientUrl = () => {
@@ -46,6 +47,12 @@ const markPaymentFailed = async (booking, statusLabel) => {
   booking.paymentFailedAt = new Date();
   booking.lastPaymentStatus = statusLabel || null;
   await booking.save();
+
+  sendPushToUser(booking.userId, {
+    title: 'Payment failed',
+    body: `Your payment for ${booking.itemSnapshot?.name || 'your booking'} didn't go through.`,
+    data: { kind: 'booking', bookingCode: booking.bookingCode, status: 'failed' },
+  }).catch(() => {});
 };
 
 // Promote a booking to "confirmed" the first time we see a paid Cashfree
@@ -93,6 +100,12 @@ const confirmBookingFromCashfree = async (booking, cfOrder) => {
   creditReferrerForFirstPaid({ booking })
     .catch((err) => console.error('[payment] referrer payout failed:', err.message));
 
+  sendPushToUser(booking.userId, {
+    title: 'Booking confirmed',
+    body: `Your booking for ${booking.itemSnapshot?.name || 'your experience'} is confirmed.`,
+    data: { kind: 'booking', bookingCode: booking.bookingCode, status: 'confirmed' },
+  }).catch(() => {});
+
   return booking;
 };
 
@@ -121,6 +134,12 @@ const confirmBookingFromLink = async (booking, link) => {
     .catch((err) => console.error('[payment] host notification email failed:', err.message));
   creditReferrerForFirstPaid({ booking })
     .catch((err) => console.error('[payment] referrer payout failed:', err.message));
+
+  sendPushToUser(booking.userId, {
+    title: 'Booking confirmed',
+    body: `Your booking for ${booking.itemSnapshot?.name || 'your experience'} is confirmed.`,
+    data: { kind: 'booking', bookingCode: booking.bookingCode, status: 'confirmed' },
+  }).catch(() => {});
 
   return booking;
 };

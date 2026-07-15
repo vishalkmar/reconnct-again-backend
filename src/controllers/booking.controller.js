@@ -1,6 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const { Booking, User, Review } = require('../models');
 const { ok, fail, created } = require('../utils/response');
+const { sendPushToUser } = require('../services/push.service');
 const {
   ALLOWED_TYPES,
   fetchItem,
@@ -521,6 +522,12 @@ const cancelMine = asyncHandler(async (req, res) => {
   // Refresh the booking from DB so the response carries the latest refund
   // state (executeRefund saved it inside).
   await booking.reload();
+
+  sendPushToUser(booking.userId, {
+    title: 'Booking cancelled',
+    body: `Your booking for ${booking.itemSnapshot?.name || 'your experience'} has been cancelled.`,
+    data: { kind: 'booking', bookingCode: booking.bookingCode, status: 'cancelled' },
+  }).catch(() => {});
 
   return ok(res, {
     booking: publicBooking(booking),

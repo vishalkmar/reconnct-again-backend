@@ -5,5 +5,6 @@ const { authenticateUser } = require('../middlewares/userAuth.middleware');
 // Notifications are per-user (derived from their bookings + wallet activity).
 router.use(authenticateUser);
 router.get('/', ctrl.list);
+router.post('/fcm-token', ctrl.registerToken);
 
 module.exports = router;
