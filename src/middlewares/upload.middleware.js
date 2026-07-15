@@ -74,6 +74,10 @@ const guessResourceType = (file) => {
   if (/\.pdf$/i.test(file.originalname)) return 'raw';
   if (file.mimetype?.startsWith('video/')) return 'video';
   if (/\.(mp4|webm|mov|avi)$/i.test(file.originalname)) return 'video';
+  // Cloudinary has no separate "audio" resource type — audio-only files go
+  // under 'video' too, which it handles fine (voice notes, etc).
+  if (file.mimetype?.startsWith('audio/')) return 'video';
+  if (/\.(m4a|mp3|wav|aac|ogg|3gp)$/i.test(file.originalname)) return 'video';
   return 'image';
 };
 

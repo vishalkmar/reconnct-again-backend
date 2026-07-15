@@ -22,10 +22,10 @@ const authenticateAny = (req, res, next) => {
   }
 };
 
-// Images + PDF only for chat attachments.
+// Images, PDF, or a voice-note recording for chat attachments.
 const attachmentUploader = buildUploader('support', {
-  allowed: /jpeg|jpg|png|gif|webp|pdf/,
-  message: 'Only images or PDF files are allowed',
+  allowed: /jpeg|jpg|png|gif|webp|pdf|m4a|mp3|mp4|wav|aac|ogg|webm|3gp/,
+  message: 'Only images, PDF files, or a voice recording are allowed',
 });
 
 // POST /api/support/attachments  (party or admin) — returns { type, url, name, size }
@@ -36,12 +36,15 @@ router.post(
   asyncHandler(async (req, res) => {
     if (!req.file) return fail(res, 'No file uploaded', 400);
     const isPdf = req.file.mimetype === 'application/pdf' || /\.pdf$/i.test(req.file.originalname || '');
+    const isAudio = !isPdf && (
+      req.file.mimetype?.startsWith('audio/') || /\.(m4a|mp3|wav|aac|ogg|webm|3gp)$/i.test(req.file.originalname || '')
+    );
     let url = getUploadedUrl(req.file);
     // Serve PDFs as a download (correct filename, opens in the device viewer)
     // instead of an inline render that the browser's PDF viewer chokes on.
     if (isPdf && url.includes('/upload/')) url = url.replace('/upload/', '/upload/fl_attachment/');
     return ok(res, {
-      type: isPdf ? 'pdf' : 'image',
+      type: isPdf ? 'pdf' : isAudio ? 'audio' : 'image',
       url,
       name: req.file.originalname,
       size: req.file.size,
