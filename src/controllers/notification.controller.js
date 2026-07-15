@@ -24,7 +24,7 @@ const list = asyncHandler(async (req, res) => {
     Booking.findAll({ where: { userId }, order: [['createdAt', 'DESC']], limit: 50 }),
     WalletTransaction.findAll({ where: { userId }, order: [['createdAt', 'DESC']], limit: 50 }),
     User.findByPk(userId, { attributes: ['name', 'createdAt'] }),
-    Experience.findAll({ where: { ownerUserId: userId }, attributes: ['id', 'name'] }),
+    Experience.findAll({ where: { ownerUserId: userId }, attributes: ['id', 'name', 'mainImage'] }),
   ]);
 
   const feed = [];
@@ -45,6 +45,7 @@ const list = asyncHandler(async (req, res) => {
   // the bell from either mode shows the relevant real activity.
   if (myListings.length) {
     const listingNames = new Map(myListings.map((e) => [e.id, e.name]));
+    const listingImages = new Map(myListings.map((e) => [e.id, e.mainImage]));
     const hostBookings = await Booking.findAll({
       where: {
         itemType: 'experience',
@@ -62,6 +63,7 @@ const list = asyncHandler(async (req, res) => {
         kind: 'host_booking',
         bookingId: j.id,
         bookingCode: j.bookingCode,
+        image: listingImages.get(j.itemId) || null,
         title: 'New booking on your listing',
         body: `${listingName} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
         // Base amount — matches the voucher email; never the guest's full
@@ -75,6 +77,7 @@ const list = asyncHandler(async (req, res) => {
           kind: 'reminder',
           bookingId: j.id,
           bookingCode: j.bookingCode,
+          image: listingImages.get(j.itemId) || null,
           isHostBooking: true,
           title: 'Booking in 1 hour',
           body: `${listingName} — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
@@ -95,6 +98,7 @@ const list = asyncHandler(async (req, res) => {
       kind: 'booking',
       status: j.status,
       bookingCode: j.bookingCode,
+      image: snap.image || null,
       title: cancelled ? 'Booking cancelled' : paid ? 'Booking confirmed' : 'Booking pending payment',
       body: `${title} — #${j.bookingCode}`,
       amount: j.totalPaise ? fromPaise(j.totalPaise) : null,
@@ -105,6 +109,7 @@ const list = asyncHandler(async (req, res) => {
         id: `r${j.id}`,
         kind: 'reminder',
         bookingCode: j.bookingCode,
+        image: snap.image || null,
         title: 'Starting in 1 hour',
         body: `${title} — don't forget!`,
         at: new Date().toISOString(),
