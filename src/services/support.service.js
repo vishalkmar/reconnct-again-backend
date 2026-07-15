@@ -15,14 +15,19 @@ const sanitizeAttachments = (raw) => {
   if (typeof arr === 'string') { try { arr = JSON.parse(arr); } catch { arr = []; } }
   if (!Array.isArray(arr)) return [];
   return arr
-    .filter((a) => a && (a.type === 'image' || a.type === 'pdf') && typeof a.url === 'string')
+    .filter((a) => a && (a.type === 'image' || a.type === 'pdf' || a.type === 'audio') && typeof a.url === 'string')
     .slice(0, 10)
     .map((a) => ({ type: a.type, url: a.url, name: String(a.name || '').slice(0, 200), size: Number(a.size) || 0 }));
 };
 
 const preview = (body, attachments) => {
   if (body) return body.slice(0, 200);
-  if (attachments && attachments.length) return attachments[0].type === 'pdf' ? '📄 PDF' : '📷 Photo';
+  if (attachments && attachments.length) {
+    const t = attachments[0].type;
+    if (t === 'pdf') return '📄 PDF';
+    if (t === 'audio') return '🎤 Voice message';
+    return '📷 Photo';
+  }
   return '';
 };
 
