@@ -9,19 +9,14 @@ const { Admin, TeamMember } = require('../models');
 // is present.
 const authenticateStaff = async (req, res, next) => {
   try {
-    const adminHeader = req.headers.authorization || '';
-    const adminToken = adminHeader.startsWith('Bearer ') ? adminHeader.slice(7) : null;
-    if (adminToken) {
-      const decoded = jwt.verify(adminToken, process.env.JWT_SECRET);
-      if (decoded.kind !== 'team_member') {
-        const admin = await Admin.findByPk(decoded.id);
-        if (admin && admin.isActive) {
-          req.admin = admin;
-          return next();
-        }
-      }
-    }
-
+    // Check the specific X-Team-Auth header FIRST. The browser's admin
+    // Authorization header can easily still be present (a stale admin
+    // session sitting in localStorage) even while acting as a team member
+    // in the Team Portal — if Authorization were checked first, a team
+    // member's own actions would get silently misattributed to the admin
+    // (e.g. a BD-created supplier would show createdByTeamMemberId: null).
+    // X-Team-Auth only exists when a request is deliberately made as a team
+    // member, so it's the more specific/trustworthy signal here.
     const teamHeader = req.headers['x-team-auth'] || req.headers['X-Team-Auth'];
     const teamToken = teamHeader ? String(teamHeader).replace(/^Bearer\s+/i, '') : null;
     if (teamToken) {
@@ -30,6 +25,19 @@ const authenticateStaff = async (req, res, next) => {
         const member = await TeamMember.findByPk(decoded.id);
         if (member && member.isActive) {
           req.teamMember = member;
+          return next();
+        }
+      }
+    }
+
+    const adminHeader = req.headers.authorization || '';
+    const adminToken = adminHeader.startsWith('Bearer ') ? adminHeader.slice(7) : null;
+    if (adminToken) {
+      const decoded = jwt.verify(adminToken, process.env.JWT_SECRET);
+      if (decoded.kind !== 'team_member') {
+        const admin = await Admin.findByPk(decoded.id);
+        if (admin && admin.isActive) {
+          req.admin = admin;
           return next();
         }
       }
