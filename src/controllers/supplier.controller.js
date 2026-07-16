@@ -14,11 +14,14 @@ const pickWritable = (body) => {
   return out;
 };
 
-// GET /api/suppliers
+// GET /api/suppliers — a team member (BD) only ever sees suppliers THEY
+// onboarded, everywhere this list is consumed (My Suppliers tab, the
+// Experience form's supplier picker, etc.); the admin still sees all of them.
 const list = asyncHandler(async (req, res) => {
   const where = {};
   if (req.query.q) where.companyName = { [Op.like]: `%${req.query.q}%` };
   if (req.query.active === 'true') where.isActive = true;
+  if (req.teamMember) where.createdByTeamMemberId = req.teamMember.id;
   const items = await Supplier.findAll({ where, order: [['sortOrder', 'ASC'], ['companyName', 'ASC']] });
   return ok(res, { items: items.map((i) => i.toSafeJSON()) });
 });
