@@ -6,6 +6,18 @@ const {
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
+const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+
+// This whole controller is shared by TWO routers: /api/host/* (a signed-in
+// User, "Switch to Hosting" — req.user, unchanged) and /api/supplier/* (a
+// Supplier's own login, Phase 4 — req.supplier). Every "my listings" query
+// resolves ownership from whichever is present instead of assuming req.user.
+const ownerWhere = (req) => (req.supplier ? { supplierId: req.supplier.id } : { ownerUserId: req.user.id });
+const setOwner = (req, data) => {
+  if (req.supplier) data.supplierId = req.supplier.id;
+  else data.ownerUserId = req.user.id;
+  return data;
+};
 
 // YYYY-MM-DD for the app/web listing-bookings cards (they sort/format on this).
 const toYMD = (d) => {
@@ -61,7 +73,7 @@ const bookingsForExperience = async (experienceId) => {
 const getBooking = asyncHandler(async (req, res) => {
   const booking = await Booking.findByPk(req.params.id);
   if (!booking || booking.itemType !== 'experience') return fail(res, 'Booking not found', 404);
-  const exp = await Experience.findOne({ where: { id: booking.itemId, ownerUserId: req.user.id } });
+  const exp = await Experience.findOne({ where: { id: booking.itemId, ...ownerWhere(req) } });
   if (!exp) return fail(res, 'Booking not found', 404);
 
   const j = booking.toJSON();
@@ -250,7 +262,7 @@ const toHostForm = (exp) => {
 // GET /api/host/listings — the signed-in host's listings (newest first).
 const listMine = asyncHandler(async (req, res) => {
   const rows = await Experience.findAll({
-    where: { ownerUserId: req.user.id },
+    where: ownerWhere(req),
     include: [CATEGORY, TYPE],
     order: [['createdAt', 'DESC']],
   });
@@ -260,7 +272,7 @@ const listMine = asyncHandler(async (req, res) => {
 // GET /api/host/listings/:id — one of my listings, with its editable form.
 const getMine = asyncHandler(async (req, res) => {
   const row = await Experience.findOne({
-    where: { id: req.params.id, ownerUserId: req.user.id },
+    where: { id: req.params.id, ...ownerWhere(req) },
     include: [CATEGORY, TYPE],
   });
   if (!row) return fail(res, 'Listing not found', 404);
@@ -273,20 +285,20 @@ const getMine = asyncHandler(async (req, res) => {
 const createMine = asyncHandler(async (req, res) => {
   const form = req.body.form || req.body || {};
   const submit = !!req.body.submit; // true → "Submit for Review"
-  const data = mapFormToExperience(form);
-  data.ownerUserId = req.user.id;
+  const data = setOwner(req, mapFormToExperience(form));
   data.status = 'draft';    // host listings never auto-publish
   data.isActive = false;    // hidden from the public catalog until approved
   data.data.hostStatus = submit ? 'pending' : 'draft';
   data.slug = await uniqueSlug(form.slug || data.name);
   const row = await Experience.create(data);
+  if (row.supplierId) ensureAccountManagerAssigned(row.supplierId).catch(() => {});
   const full = await Experience.findByPk(row.id, { include: [CATEGORY, TYPE] });
   return created(res, { listing: toHostListing(full), form: toHostForm(full) }, submit ? 'Submitted for review' : 'Saved as draft');
 });
 
 // PUT /api/host/listings/:id  { form, submit? } — update my listing.
 const updateMine = asyncHandler(async (req, res) => {
-  const row = await Experience.findOne({ where: { id: req.params.id, ownerUserId: req.user.id } });
+  const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
   if (!row) return fail(res, 'Listing not found', 404);
   const form = req.body.form || req.body || {};
   const data = mapFormToExperience(form);
@@ -302,7 +314,7 @@ const updateMine = asyncHandler(async (req, res) => {
 
 // DELETE /api/host/listings/:id
 const removeMine = asyncHandler(async (req, res) => {
-  const row = await Experience.findOne({ where: { id: req.params.id, ownerUserId: req.user.id } });
+  const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
   if (!row) return fail(res, 'Listing not found', 404);
   await row.destroy();
   return ok(res, {}, 'Listing deleted');
@@ -311,7 +323,7 @@ const removeMine = asyncHandler(async (req, res) => {
 // GET /api/host/summary — dashboard stats (real, derived from the host's data).
 const summary = asyncHandler(async (req, res) => {
   const rows = await Experience.findAll({
-    where: { ownerUserId: req.user.id },
+    where: ownerWhere(req),
     attributes: ['id', 'name', 'status', 'isActive', 'data', 'rating'],
   });
   const listingCount = rows.length;
@@ -384,7 +396,7 @@ const summary = asyncHandler(async (req, res) => {
 // voucher email and the dashboard stats exactly). No pending/dummy rows —
 // a booking only ever reaches this list once it's actually been paid.
 const listTransactions = asyncHandler(async (req, res) => {
-  const rows = await Experience.findAll({ where: { ownerUserId: req.user.id }, attributes: ['id', 'name'] });
+  const rows = await Experience.findAll({ where: ownerWhere(req), attributes: ['id', 'name'] });
   const expIds = rows.map((r) => r.id);
   const nameById = new Map(rows.map((r) => [r.id, r.name]));
   const bookingRows = expIds.length

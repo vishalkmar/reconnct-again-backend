@@ -5,6 +5,7 @@ const {
   Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier,
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
+const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
 
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
@@ -123,7 +124,16 @@ const create = asyncHandler(async (req, res) => {
   const data = pickWritable(req.body);
   if (!data.name || !String(data.name).trim()) return fail(res, 'name is required', 400);
   data.slug = await uniqueSlug(req.body.slug || data.name);
+  // A team member's submission always goes to Center Ops for review first —
+  // whatever status the form requested is overridden. Admin's own direct
+  // creates are completely unaffected (req.teamMember is only set when the
+  // request came in on the team-portal auth path).
+  if (req.teamMember) {
+    data.status = 'pending_review';
+    data.createdByTeamMemberId = req.teamMember.id;
+  }
   const item = await Experience.create(data);
+  if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return created(res, { item: await withAudiences(full) }, 'Experience saved');
 });
@@ -132,6 +142,16 @@ const create = asyncHandler(async (req, res) => {
 const update = asyncHandler(async (req, res) => {
   const item = await Experience.findByPk(req.params.id);
   if (!item) return fail(res, 'Experience not found', 404);
+
+  // A team member may only edit their OWN submission, and only while it's
+  // still editable (draft — e.g. Center Ops just sent it back with
+  // changes). Once published/archived it's out of their hands. Admin is
+  // unrestricted, same as before.
+  if (req.teamMember) {
+    if (item.createdByTeamMemberId !== req.teamMember.id) return fail(res, 'Not your submission', 403);
+    if (item.status !== 'draft') return fail(res, 'This experience can no longer be edited', 400);
+  }
+
   const data = pickWritable(req.body);
   if (req.body.slug !== undefined && req.body.slug !== item.slug) {
     data.slug = await uniqueSlug(req.body.slug, item.id);
@@ -180,4 +200,24 @@ const reorder = asyncHandler(async (req, res) => {
   return ok(res, {}, 'Reordered');
 });
 
-module.exports = { list, getOne, create, update, duplicate, toggle, remove, reorder };
+// POST /api/experiences/:id/resubmit — a team member sends their own
+// changes-requested/rejected submission back into the Center Ops queue.
+// (Host listings resubmit through their existing PUT /host/listings/:id
+// { submit:true } instead — untouched by this.)
+const resubmit = asyncHandler(async (req, res) => {
+  if (!req.teamMember) return fail(res, 'Only a team member submission can be resubmitted here', 400);
+  const item = await Experience.findByPk(req.params.id);
+  if (!item) return fail(res, 'Experience not found', 404);
+  if (item.createdByTeamMemberId !== req.teamMember.id) return fail(res, 'Not your submission', 403);
+  if (!['draft', 'archived'].includes(item.status)) return fail(res, 'This experience is not awaiting resubmission', 400);
+
+  item.status = 'pending_review';
+  item.reviewNote = null;
+  await item.save();
+  const full = await Experience.findByPk(item.id, { include: INCLUDE });
+  return ok(res, { item: await withAudiences(full) }, 'Resubmitted for review');
+});
+
+module.exports = {
+  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit,
+};

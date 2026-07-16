@@ -57,8 +57,10 @@ const corsOptions = {
   // NOTE: X-User-Auth carries the public-site user token (kept separate from the
   // admin Authorization header). It MUST be allow-listed or the browser blocks
   // every signed-in user request (/me, /wishlist, …) — which silently logs the
-  // user back out right after a successful login.
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-User-Auth'],
+  // user back out right after a successful login. X-Team-Auth is the same idea
+  // for internal staff (BD/COPS/...) on the team portal, X-Supplier-Auth for a
+  // supplier's own login on the Supplier Portal.
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-User-Auth', 'X-Team-Auth', 'X-Supplier-Auth'],
 };
 
 app.use(cors(corsOptions));

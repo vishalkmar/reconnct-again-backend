@@ -15,6 +15,11 @@ router.use('/admin/bookings', require('./adminBooking.routes'));
 router.use('/admin/users', require('./adminUser.routes'));
 router.use('/admin/notifications', require('./adminNotification.routes'));
 router.use('/admin/experience-reviews', require('./adminExperienceReview.routes'));
+router.use('/admin/team', require('./adminTeam.routes'));
+router.use('/team/auth', require('./teamAuth.routes'));
+router.use('/team/review-queue', require('./reviewQueue.routes'));
+router.use('/team/my-suppliers', require('./accountManager.routes'));
+router.use('/team/my-customers', require('./csm.routes'));
 router.use('/admin', require('./adminConfig.routes'));
 router.use('/heroes', require('./hero.routes'));
 router.use('/header-links', require('./headerLink.routes'));
@@ -60,6 +65,8 @@ router.use('/contracts', require('./contract.routes'));
 // Host ("Switch to Host") — a signed-in user creates/manages their own
 // experience listings from the app or website. See host.controller.js.
 router.use('/host', require('./host.routes'));
+router.use('/supplier/auth', require('./supplierAuth.routes'));
+router.use('/supplier', require('./supplierPortal.routes'));
 
 // Customer support chat (user + supplier queues → admin). See
 // docs/CUSTOMER_SUPPORT_CHAT.md. Socket layer added in Phase 3.

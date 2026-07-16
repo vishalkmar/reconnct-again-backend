@@ -2,6 +2,8 @@ const router = require('express').Router();
 const asyncHandler = require('express-async-handler');
 const { authenticate } = require('../middlewares/auth.middleware');
 const { authenticateUser } = require('../middlewares/userAuth.middleware');
+const { authenticateStaff } = require('../middlewares/staffAuth.middleware');
+const { authenticateUserOrSupplier } = require('../middlewares/supplierAuth.middleware');
 const { buildUploader, MAX_IMAGE_MB, MAX_IMAGE_BYTES } = require('../middlewares/upload.middleware');
 const { getUploadedUrl } = require('../utils/uploads');
 const { ok, fail } = require('../utils/response');
@@ -17,11 +19,12 @@ const documentUploader = buildUploader('documents', {
   message: 'Only PDF, DOC/DOCX or image files are allowed',
 });
 
-// POST /api/uploads/inline  (admin) — single image used inline in rich-text
-// editors (e.g. custom bullet/marker icons). Returns the public URL.
+// POST /api/uploads/inline  (admin OR a permitted team member) — single
+// image used inline in rich-text editors and by the supplier/experience
+// forms' image droppers. Returns the public URL.
 router.post(
   '/inline',
-  authenticate,
+  authenticateStaff,
   uploader.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) return fail(res, 'No file uploaded', 400);
@@ -50,7 +53,7 @@ router.post(
 // pipeline. Guards: http(s) only, image content-type only, same global 5MB cap.
 router.get(
   '/proxy-image',
-  authenticate,
+  authenticateStaff,
   asyncHandler(async (req, res) => {
     const { url } = req.query;
     if (!url || !/^https?:\/\//i.test(url)) return fail(res, 'A valid http(s) image URL is required', 400);
@@ -91,15 +94,16 @@ router.post(
   })
 );
 
-// POST /api/uploads/user-image  (signed-in user) — general image upload used by
-// the "Switch to Host" listing wizard (cover + gallery photos). Returns the URL.
+// POST /api/uploads/user-image  (signed-in user OR a supplier's own login) —
+// general image upload used by the "Switch to Host" listing wizard AND the
+// Supplier Portal's identical wizard (cover + gallery photos). Returns the URL.
 const hostImageUploader = buildUploader('host-listings', {
   allowed: /jpeg|jpg|png|gif|webp/,
   message: 'Only image files are allowed',
 });
 router.post(
   '/user-image',
-  authenticateUser,
+  authenticateUserOrSupplier,
   hostImageUploader.single('file'),
   asyncHandler(async (req, res) => {
     if (!req.file) return fail(res, 'No file uploaded', 400);

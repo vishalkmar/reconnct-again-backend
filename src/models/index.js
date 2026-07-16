@@ -1,5 +1,6 @@
 const { sequelize } = require('../config/database');
 const Admin = require('./admin.model');
+const TeamMember = require('./teamMember.model');
 const Hero = require('./hero.model');
 const HeroMedia = require('./heroMedia.model');
 const HeaderLink = require('./headerLink.model');
@@ -59,6 +60,7 @@ const SupportMessage = require('./supportMessage.model');
 const db = {
   sequelize,
   Admin,
+  TeamMember,
   Hero,
   HeroMedia,
   HeaderLink,

@@ -50,6 +50,12 @@ const User = sequelize.define(
     // host mode are the same User row, so a single token covers both).
     // Overwritten on every login/refresh; the latest write wins.
     fcmToken: { type: DataTypes.STRING(255), allowNull: true },
+
+    // Auto-assigned (least-loaded round robin across active csm team
+    // members) the first time this user hits a "needs help" signal — a
+    // failed payment or a cancelled booking — see csm.service.js. Sticky
+    // once set (same customer keeps the same CSM across future incidents).
+    csmId: { type: DataTypes.INTEGER, allowNull: true },
   },
   {
     tableName: 'users',

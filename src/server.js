@@ -151,6 +151,56 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migrateTeamStaffFields } = require('./scripts/migrateTeamStaffFields');
+    const result = await migrateTeamStaffFields();
+    if (result.changes?.length) {
+      console.log(`[DB] Team staff fields schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Team staff fields migration failed (non-fatal):', err.message);
+  }
+
+  try {
+    const { migrate: migrateCsmFields } = require('./scripts/migrateCsmFields');
+    const result = await migrateCsmFields();
+    if (result.changes?.length) {
+      console.log(`[DB] CSM schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] CSM migration failed (non-fatal):', err.message);
+  }
+
+  try {
+    const { migrate: migrateAccountManagerFields } = require('./scripts/migrateAccountManagerFields');
+    const result = await migrateAccountManagerFields();
+    if (result.changes?.length) {
+      console.log(`[DB] Account manager schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Account manager migration failed (non-fatal):', err.message);
+  }
+
+  try {
+    const { migrate: migrateSupplierAuth } = require('./scripts/migrateSupplierAuth');
+    const result = await migrateSupplierAuth();
+    if (result.changes?.length) {
+      console.log(`[DB] Supplier auth schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Supplier auth migration failed (non-fatal):', err.message);
+  }
+
+  try {
+    const { migrate: migrateReviewQueueFields } = require('./scripts/migrateReviewQueueFields');
+    const result = await migrateReviewQueueFields();
+    if (result.changes?.length) {
+      console.log(`[DB] Review queue schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Review queue migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migratePushTokens } = require('./scripts/migratePushTokens');
     const result = await migratePushTokens();
     if (result.changes?.length) {

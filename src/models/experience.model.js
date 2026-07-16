@@ -36,6 +36,20 @@ const Experience = sequelize.define(
     // app / website. NULL for admin-authored experiences. Host-created rows are
     // owned + editable by that user and start life as a draft / pending review.
     ownerUserId: { type: DataTypes.INTEGER, allowNull: true },
+    // The BD (or other permitted staff) who created this via the team portal
+    // instead of the admin panel directly — null for admin-authored rows.
+    // Forced into status:'pending_review' regardless of what was requested;
+    // Center Ops (a later phase) reviews before it can go live.
+    createdByTeamMemberId: { type: DataTypes.INTEGER, allowNull: true },
+    // Center Ops review trail — set by whichever COPS (or admin) actions the
+    // item in the review queue. reviewNote carries reject/changes-requested
+    // feedback back to whoever submitted it (BD or host).
+    reviewNote: { type: DataTypes.TEXT, allowNull: true },
+    reviewedByTeamMemberId: { type: DataTypes.INTEGER, allowNull: true },
+    reviewedAt: { type: DataTypes.DATE, allowNull: true },
+    // Set when Center Ops escalates a submission to a specific Quality
+    // Check Ops reviewer (picked from a list of qcops-role team members).
+    qcopsTeamMemberId: { type: DataTypes.INTEGER, allowNull: true },
     // Whether the supplier's info is shown publicly (website + app). Admin toggle.
     showSupplierPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 
@@ -55,7 +69,7 @@ const Experience = sequelize.define(
     videos: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },  // [{type,url}]
 
     mode: { type: DataTypes.ENUM('online', 'offline', 'hybrid'), defaultValue: 'offline' },
-    status: { type: DataTypes.ENUM('draft', 'published', 'archived'), defaultValue: 'draft' },
+    status: { type: DataTypes.ENUM('draft', 'pending_review', 'published', 'archived'), defaultValue: 'draft' },
 
     // ── Pricing (Task 4 #9) ──────────────────────────────────────────────
     // priceMethod: per_person | per_day | days | per_hours

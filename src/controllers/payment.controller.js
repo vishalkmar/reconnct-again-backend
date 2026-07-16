@@ -16,6 +16,7 @@ const {
 const { sendBookingConfirmation, notifyHostOfBooking } = require('../services/bookingEmail.service');
 const { creditReferrerForFirstPaid } = require('../services/referEarn.service');
 const { sendPushToUser } = require('../services/push.service');
+const { ensureCsmAssigned } = require('../services/csm.service');
 const { publicBooking } = require('./booking.controller');
 
 const clientUrl = () => {
@@ -53,6 +54,8 @@ const markPaymentFailed = async (booking, statusLabel) => {
     body: `Your payment for ${booking.itemSnapshot?.name || 'your booking'} didn't go through.`,
     data: { kind: 'booking', bookingCode: booking.bookingCode, status: 'failed' },
   }).catch(() => {});
+
+  ensureCsmAssigned(booking.userId).catch(() => {});
 };
 
 // Promote a booking to "confirmed" the first time we see a paid Cashfree
