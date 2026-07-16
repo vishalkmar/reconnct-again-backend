@@ -143,6 +143,79 @@ const list = asyncHandler(async (req, res) => {
   return ok(res, { notifications: feed, count: feed.length });
 });
 
+// GET /api/supplier/notifications — a Supplier isn't a User (no personal
+// bookings/wallet of its own); only bookings on Experiences it owns count.
+// Same feed shape/kind (`host_booking`/`reminder`) as the Host side of the
+// feed above, so both web and app can reuse one notification list/bell.
+const listForSupplier = asyncHandler(async (req, res) => {
+  const supplierId = req.supplier.id;
+  const myListings = await Experience.findAll({ where: { supplierId }, attributes: ['id', 'name', 'mainImage'] });
+
+  const feed = [];
+  const now = Date.now();
+  const REMINDER_WINDOW_HOURS = 1;
+  const withinHours = (scheduledAt, hours) => {
+    if (!scheduledAt) return false;
+    const diffMs = new Date(scheduledAt).getTime() - now;
+    return diffMs > 0 && diffMs <= hours * 60 * 60 * 1000;
+  };
+
+  if (myListings.length) {
+    const listingNames = new Map(myListings.map((e) => [e.id, e.name]));
+    const listingImages = new Map(myListings.map((e) => [e.id, e.mainImage]));
+    const bookings = await Booking.findAll({
+      where: {
+        itemType: 'experience',
+        itemId: { [Op.in]: myListings.map((e) => e.id) },
+        status: { [Op.in]: ['confirmed', 'completed'] },
+      },
+      order: [['createdAt', 'DESC']],
+      limit: 50,
+    });
+    for (const b of bookings) {
+      const j = b.toJSON();
+      const listingName = listingNames.get(j.itemId) || 'Your experience';
+      feed.push({
+        id: `h${j.id}`,
+        kind: 'host_booking',
+        bookingId: j.id,
+        bookingCode: j.bookingCode,
+        image: listingImages.get(j.itemId) || null,
+        title: 'New booking on your listing',
+        body: `${listingName} — ${j.guestName || 'Guest'} · #${j.bookingCode}`,
+        // Base amount, matching the Host feed above — the supplier's payout
+        // basis, not the guest's GST/convenience-fee-inclusive total.
+        amount: j.subtotalPaise ? fromPaise(j.subtotalPaise) : null,
+        at: j.paidAt || j.createdAt,
+      });
+      if (j.status === 'confirmed' && withinHours(j.scheduledAt, REMINDER_WINDOW_HOURS)) {
+        feed.push({
+          id: `hr${j.id}`,
+          kind: 'reminder',
+          bookingId: j.id,
+          bookingCode: j.bookingCode,
+          image: listingImages.get(j.itemId) || null,
+          isHostBooking: true,
+          title: 'Booking in 1 hour',
+          body: `${listingName} — ${j.guestName || 'Guest'} (${j.guestCount || 1} guest${j.guestCount === 1 ? '' : 's'})`,
+          at: new Date().toISOString(),
+        });
+      }
+    }
+  }
+
+  feed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
+  feed.push({
+    id: 'welcome',
+    kind: 'welcome',
+    title: 'Welcome to the Supplier Portal!',
+    body: 'New bookings on your listings will show up here.',
+    at: '',
+  });
+
+  return ok(res, { notifications: feed, count: feed.length });
+});
+
 // POST /api/notifications/fcm-token  { fcmToken, platform } — registers/
 // refreshes this device's push token against the signed-in account. One
 // token per user: traveller and host mode are the same account, so a single
@@ -154,4 +227,4 @@ const registerToken = asyncHandler(async (req, res) => {
   return ok(res, {}, 'Registered');
 });
 
-module.exports = { list, registerToken };
+module.exports = { list, listForSupplier, registerToken };
