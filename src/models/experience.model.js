@@ -50,6 +50,17 @@ const Experience = sequelize.define(
     // Set when Center Ops escalates a submission to a specific Quality
     // Check Ops reviewer (picked from a list of qcops-role team members).
     qcopsTeamMemberId: { type: DataTypes.INTEGER, allowNull: true },
+    // ── Granular (section-by-section) review trail ───────────────────────
+    // Per-section decisions keyed by section registry key (utils/reviewSections):
+    //   { [key]: { decision:'approved'|'objection', objection, at, by } }
+    reviewSections: { type: DataTypes.JSON, allowNull: true },
+    // COPS's optional round-level suggestion shown back to the submitter.
+    reviewSuggestion: { type: DataTypes.TEXT, allowNull: true },
+    // How many follow-up cycles have run (0 = first pass).
+    reviewRound: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    // Where the item sits in the granular pipeline: submitted | in_review |
+    // follow_up (back with the submitter) | resubmitted (back at COPS).
+    reviewStage: { type: DataTypes.STRING(24), allowNull: true },
     // Whether the supplier's info is shown publicly (website + app). Admin toggle.
     showSupplierPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 

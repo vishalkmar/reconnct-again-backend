@@ -6,6 +6,8 @@ const {
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+const { summarize, resetForNewRound } = require('../utils/reviewSections');
+const reviewNotify = require('../services/reviewNotify.service');
 
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
@@ -66,6 +68,14 @@ const withAudiences = async (exp) => {
   j.audienceItems = aud.map((a) => ({ id: a.id, name: a.name, slug: a.slug, icon: a.icon }));
   j.categoryItems = cats.map((c) => ({ id: c.id, name: c.name, slug: c.slug, icon: c.icon }));
   j.typeItems = types.map((t) => ({ id: t.id, name: t.name, slug: t.slug }));
+  // Section-level review rollup so the submitter's dashboard can show which
+  // sections carry objections (with counts/messages) without re-deriving it.
+  j.review = {
+    stage: j.reviewStage || null,
+    round: j.reviewRound || 0,
+    suggestion: j.reviewSuggestion || '',
+    summary: summarize(j),
+  };
   return j;
 };
 
@@ -134,6 +144,14 @@ const create = asyncHandler(async (req, res) => {
   }
   const item = await Experience.create(data);
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
+  if (req.teamMember && item.status === 'pending_review') {
+    reviewNotify.notifyCopsTeam({
+      experienceId: item.id,
+      kind: 'submitted',
+      title: `New submission: "${item.name}"`,
+      meta: { experienceName: item.name },
+    }).catch(() => {});
+  }
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return created(res, { item: await withAudiences(full) }, 'Experience saved');
 });
@@ -213,7 +231,25 @@ const resubmit = asyncHandler(async (req, res) => {
 
   item.status = 'pending_review';
   item.reviewNote = null;
+  // "Review again" after a follow-up: keep the sections COPS already approved,
+  // drop the objected ones back to pending, and mark it as a follow-up round
+  // so it lands in the queue's Follow-up lane.
+  if (item.reviewStage === 'follow_up' || (item.reviewSections && Object.keys(item.reviewSections).length)) {
+    item.reviewSections = resetForNewRound(item.reviewSections);
+    item.reviewStage = 'resubmitted';
+    item.reviewRound = (item.reviewRound || 0) + 1;
+  }
   await item.save();
+
+  // Back in Center Ops's lap — ping the COPS team + live-refresh their queue.
+  await reviewNotify.notifyCopsTeam({
+    experienceId: item.id,
+    kind: item.reviewStage === 'resubmitted' ? 'resubmitted' : 'submitted',
+    title: item.reviewStage === 'resubmitted' ? `Re-submitted for review: "${item.name}"` : `New submission: "${item.name}"`,
+    message: item.reviewStage === 'resubmitted' ? 'The submitter addressed the objections — ready for another look.' : null,
+    meta: { experienceName: item.name, round: item.reviewRound || 0 },
+  }).catch(() => {});
+
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: await withAudiences(full) }, 'Resubmitted for review');
 });

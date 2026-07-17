@@ -18,6 +18,7 @@ router.use('/admin/experience-reviews', require('./adminExperienceReview.routes'
 router.use('/admin/team', require('./adminTeam.routes'));
 router.use('/team/auth', require('./teamAuth.routes'));
 router.use('/team/review-queue', require('./reviewQueue.routes'));
+router.use('/team/review-notifications', require('./reviewNotification.routes'));
 router.use('/team/my-suppliers', require('./accountManager.routes'));
 router.use('/team/my-customers', require('./csm.routes'));
 router.use('/admin', require('./adminConfig.routes'));

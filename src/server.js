@@ -6,6 +6,7 @@ const { sequelize, connectDB } = require('./config/database');
 require('./models'); // load models (incl. PWA via models/index.js)
 const { initSocket } = require('./pwa/services/socket');
 const { initSupportSocket } = require('./support/supportSocket');
+const { initReviewSocket } = require('./services/reviewNotify.service');
 
 const PORT = process.env.PORT || 5000;
 
@@ -201,6 +202,26 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migrateSectionReviewFields } = require('./scripts/migrateSectionReviewFields');
+    const result = await migrateSectionReviewFields();
+    if (result.changes?.length) {
+      console.log(`[DB] Section review schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Section review migration failed (non-fatal):', err.message);
+  }
+
+  try {
+    const { migrate: migrateReviewNotifications } = require('./scripts/migrateReviewNotifications');
+    const result = await migrateReviewNotifications();
+    if (result.changes?.length) {
+      console.log(`[DB] Review notifications schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Review notifications migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migratePushTokens } = require('./scripts/migratePushTokens');
     const result = await migratePushTokens();
     if (result.changes?.length) {
@@ -294,6 +315,7 @@ const start = async () => {
   const httpServer = http.createServer(app);
   const io = initSocket(httpServer);
   initSupportSocket(io); // /support namespace (customer support chat)
+  initReviewSocket(io); // /review namespace (experience-review real-time)
 
   httpServer.listen(PORT, () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);

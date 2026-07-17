@@ -7,6 +7,8 @@ const {
 const { ok, created, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+const { resetForNewRound, summarize } = require('../utils/reviewSections');
+const reviewNotify = require('../services/reviewNotify.service');
 
 // This whole controller is shared by TWO routers: /api/host/* (a signed-in
 // User, "Switch to Hosting" — req.user, unchanged) and /api/supplier/* (a
@@ -217,6 +219,11 @@ const toHostListing = (exp) => {
     rating: Number(j.rating) || 0,
     isPublished: j.status === 'published' && j.isActive,
     bookings: [], // real host-booking feed lands in a later phase
+    // Center Ops section-review state so the host/supplier card can show
+    // objections + suggestion after a follow-up.
+    review: { ...summarize(j), round: j.reviewRound || 0, stage: j.reviewStage || null },
+    reviewNote: j.reviewNote || null,
+    reviewSuggestion: j.reviewSuggestion || null,
     createdAt: j.createdAt,
     updatedAt: j.updatedAt,
   };
@@ -292,6 +299,9 @@ const createMine = asyncHandler(async (req, res) => {
   data.slug = await uniqueSlug(form.slug || data.name);
   const row = await Experience.create(data);
   if (row.supplierId) ensureAccountManagerAssigned(row.supplierId).catch(() => {});
+  if (submit) {
+    reviewNotify.notifyCopsTeam({ experienceId: row.id, kind: 'submitted', title: `New submission: "${row.name}"`, meta: { experienceName: row.name } }).catch(() => {});
+  }
   const full = await Experience.findByPk(row.id, { include: [CATEGORY, TYPE] });
   return created(res, { listing: toHostListing(full), form: toHostForm(full) }, submit ? 'Submitted for review' : 'Saved as draft');
 });
@@ -307,7 +317,28 @@ const updateMine = asyncHandler(async (req, res) => {
   delete data.isActive;
   data.data.hostStatus = req.body.submit ? 'pending' : ((row.data && row.data.hostStatus) || 'draft');
   if (form.slug !== undefined && form.slug !== row.slug) data.slug = await uniqueSlug(form.slug, row.id);
+
+  // "Review again" after a Center Ops follow-up: keep approved sections, drop
+  // objected ones back to pending, and mark it as a follow-up round.
+  const isReviewAgain = req.body.submit
+    && (row.reviewStage === 'follow_up' || (row.reviewSections && Object.keys(row.reviewSections).length));
+  if (isReviewAgain) {
+    data.reviewSections = resetForNewRound(row.reviewSections);
+    data.reviewStage = 'resubmitted';
+    data.reviewRound = (row.reviewRound || 0) + 1;
+  }
   await row.update(data);
+
+  if (req.body.submit) {
+    reviewNotify.notifyCopsTeam({
+      experienceId: row.id,
+      kind: isReviewAgain ? 'resubmitted' : 'submitted',
+      title: isReviewAgain ? `Re-submitted for review: "${row.name}"` : `New submission: "${row.name}"`,
+      message: isReviewAgain ? 'The submitter addressed the objections — ready for another look.' : null,
+      meta: { experienceName: row.name, round: data.reviewRound || 0 },
+    }).catch(() => {});
+  }
+
   const full = await Experience.findByPk(row.id, { include: [CATEGORY, TYPE] });
   return ok(res, { listing: toHostListing(full), form: toHostForm(full) }, req.body.submit ? 'Submitted for review' : 'Listing updated');
 });
