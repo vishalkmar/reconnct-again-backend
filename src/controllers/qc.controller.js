@@ -42,14 +42,25 @@ const submitterContact = async (exp) => {
 
 // ── QCOPS side ──────────────────────────────────────────────────────────
 
-// GET /api/team/qc/mine — the QCOPS member's assigned on-site visits.
+// GET /api/team/qc/mine — EVERYTHING assigned to this QCOPS across all stages
+// (active visits + approved + rejected), plus a stats rollup for their board.
+// Nothing is ever deleted from their view — final outcomes stay visible.
 const mine = asyncHandler(async (req, res) => {
   const rows = await Experience.findAll({
-    where: { qcopsTeamMemberId: req.teamMember.id, reviewStage: { [Op.in]: QC_STAGES } },
+    where: { qcopsTeamMemberId: req.teamMember.id },
     include: INCLUDE,
     order: [['updatedAt', 'DESC']],
   });
-  return ok(res, { items: rows.map((r) => r.toJSON()), fields: QC_FEEDBACK_FIELDS });
+  const stats = { assigned: rows.length, pending: 0, awaitingDecision: 0, feedbackGiven: 0, approved: 0, rejected: 0, live: 0 };
+  for (const r of rows) {
+    if (['qc_assigned', 'qc_acknowledged', 'qc_onsite'].includes(r.reviewStage)) stats.pending += 1;
+    if (r.reviewStage === 'qc_feedback') stats.awaitingDecision += 1;
+    if (r.qcReview?.feedbackSubmittedAt) stats.feedbackGiven += 1;
+    if (r.reviewStage === 'published') stats.approved += 1;
+    if (r.reviewStage === 'qc_rejected') stats.rejected += 1;
+    if (r.status === 'published' && r.isActive) stats.live += 1;
+  }
+  return ok(res, { items: rows.map((r) => r.toJSON()), fields: QC_FEEDBACK_FIELDS, stats });
 });
 
 const ownAssigned = async (req, id) => {

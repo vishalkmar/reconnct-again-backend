@@ -31,7 +31,9 @@ const isSelfServicePending = (exp) => (
   && exp.status === 'draft'
   && exp.data && exp.data.hostStatus === 'pending'
 );
-const isStaffPending = (exp) => !!exp.createdByTeamMemberId && exp.status === 'pending_review';
+// Any pending_review item is reviewable regardless of who created it (BD,
+// staff, OR an admin whose direct publish was routed through the pipeline).
+const isStaffPending = (exp) => exp.status === 'pending_review';
 const isReviewable = (exp) => isStaffPending(exp) || isSelfServicePending(exp);
 
 // Attaches a uniform `source` block so the queue UI can show/badge/filter by

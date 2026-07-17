@@ -8,7 +8,7 @@ const CARD_ATTRS = ['id', 'name', 'mainImage', 'location', 'status', 'reviewStag
   'reviewSections', 'reviewSuggestion', 'reviewNote', 'supplierId', 'createdByTeamMemberId', 'ownerUserId', 'data'];
 
 const isSelfServicePending = (e) => (!e.createdByTeamMemberId && (e.ownerUserId || e.supplierId) && e.status === 'draft' && e.data && e.data.hostStatus === 'pending');
-const isStaffPending = (e) => !!e.createdByTeamMemberId && e.status === 'pending_review';
+const isStaffPending = (e) => e.status === 'pending_review';
 const isReviewable = (e) => isStaffPending(e) || isSelfServicePending(e);
 
 const card = (e) => {

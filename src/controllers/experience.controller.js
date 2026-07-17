@@ -157,10 +157,16 @@ const create = asyncHandler(async (req, res) => {
     if (imgErr) return fail(res, imgErr, 400);
     data.status = 'pending_review';
     data.createdByTeamMemberId = req.teamMember.id;
+  } else if (data.status === 'published') {
+    // GLOBAL RULE: nothing goes live without the COPS + QCOPS pipeline — even an
+    // admin upload can't publish directly; it enters the review queue instead.
+    const imgErr = validateImagesForSubmit(data);
+    if (imgErr) return fail(res, imgErr, 400);
+    data.status = 'pending_review';
   }
   const item = await Experience.create(data);
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
-  if (req.teamMember && item.status === 'pending_review') {
+  if (item.status === 'pending_review') {
     reviewNotify.notifyCopsTeam({
       experienceId: item.id,
       kind: 'submitted',
