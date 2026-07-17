@@ -7,8 +7,11 @@ const {
 const { ok, created, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
-const { resetForNewRound, summarize } = require('../utils/reviewSections');
+const {
+  resetForNewRound, summarize, buildRoundResolutions, logResolutions, sectionChanged,
+} = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
+const { validateImagesForSubmit } = require('../utils/experienceValidation');
 
 // This whole controller is shared by TWO routers: /api/host/* (a signed-in
 // User, "Switch to Hosting" — req.user, unchanged) and /api/supplier/* (a
@@ -220,8 +223,19 @@ const toHostListing = (exp) => {
     isPublished: j.status === 'published' && j.isActive,
     bookings: [], // real host-booking feed lands in a later phase
     // Center Ops section-review state so the host/supplier card can show
-    // objections + suggestion after a follow-up.
-    review: { ...summarize(j), round: j.reviewRound || 0, stage: j.reviewStage || null },
+    // objections (with change status + chat history) + suggestion.
+    review: (() => {
+      const snap = j.reviewSnapshot || null;
+      const sm = summarize(j);
+      sm.objections = sm.objections.map((o) => ({ ...o, changed: sectionChanged(j, o.key, snap) }));
+      return {
+        ...sm,
+        round: j.reviewRound || 0,
+        stage: j.reviewStage || null,
+        suggestion: j.reviewSuggestion || '',
+        thread: j.reviewThread || {},
+      };
+    })(),
     reviewNote: j.reviewNote || null,
     reviewSuggestion: j.reviewSuggestion || null,
     createdAt: j.createdAt,
@@ -293,6 +307,10 @@ const createMine = asyncHandler(async (req, res) => {
   const form = req.body.form || req.body || {};
   const submit = !!req.body.submit; // true → "Submit for Review"
   const data = setOwner(req, mapFormToExperience(form));
+  if (submit) {
+    const imgErr = validateImagesForSubmit(data);
+    if (imgErr) return fail(res, imgErr, 400);
+  }
   data.status = 'draft';    // host listings never auto-publish
   data.isActive = false;    // hidden from the public catalog until approved
   data.data.hostStatus = submit ? 'pending' : 'draft';
@@ -315,6 +333,12 @@ const updateMine = asyncHandler(async (req, res) => {
   // Keep it host-owned + unpublished; only the admin can flip status/isActive.
   delete data.status;
   delete data.isActive;
+  if (req.body.submit) {
+    // Validate against the merged result so a partial update still enforces it.
+    const merged = { mainImage: 'mainImage' in data ? data.mainImage : row.mainImage, gallery: 'gallery' in data ? data.gallery : row.gallery };
+    const imgErr = validateImagesForSubmit(merged);
+    if (imgErr) return fail(res, imgErr, 400);
+  }
   data.data.hostStatus = req.body.submit ? 'pending' : ((row.data && row.data.hostStatus) || 'draft');
   if (form.slug !== undefined && form.slug !== row.slug) data.slug = await uniqueSlug(form.slug, row.id);
 
@@ -323,6 +347,13 @@ const updateMine = asyncHandler(async (req, res) => {
   const isReviewAgain = req.body.submit
     && (row.reviewStage === 'follow_up' || (row.reviewSections && Object.keys(row.reviewSections).length));
   if (isReviewAgain) {
+    // Require a resolution note per objected section (diff computed vs snapshot
+    // AFTER the field edits above are applied — pass the merged next state).
+    const nextState = { ...row.toJSON(), ...data };
+    const { error: resErr, resolutions } = buildRoundResolutions(nextState, req.body?.resolutions);
+    if (resErr) return fail(res, resErr, 400);
+    data.reviewResolutions = resolutions;
+    data.reviewThread = logResolutions(row.reviewThread, resolutions, row.reviewRound || 0);
     data.reviewSections = resetForNewRound(row.reviewSections);
     data.reviewStage = 'resubmitted';
     data.reviewRound = (row.reviewRound || 0) + 1;

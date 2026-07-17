@@ -6,8 +6,11 @@ const {
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
-const { summarize, resetForNewRound } = require('../utils/reviewSections');
+const {
+  summarize, resetForNewRound, buildRoundResolutions, sectionChanged, logResolutions,
+} = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
+const { validateImagesForSubmit } = require('../utils/experienceValidation');
 
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
@@ -70,11 +73,21 @@ const withAudiences = async (exp) => {
   j.typeItems = types.map((t) => ({ id: t.id, name: t.name, slug: t.slug }));
   // Section-level review rollup so the submitter's dashboard can show which
   // sections carry objections (with counts/messages) without re-deriving it.
+  const snap = j.reviewSnapshot || null;
+  const rvSummary = summarize(j);
+  // Tell the submitter, per objection, whether they've changed the section
+  // since it was objected to (diff vs the follow-up snapshot) + the before state.
+  rvSummary.objections = rvSummary.objections.map((o) => ({
+    ...o,
+    changed: sectionChanged(j, o.key, snap),
+    before: snap ? snap[o.key] : null,
+  }));
   j.review = {
     stage: j.reviewStage || null,
     round: j.reviewRound || 0,
     suggestion: j.reviewSuggestion || '',
-    summary: summarize(j),
+    summary: rvSummary,
+    thread: j.reviewThread || {},
   };
   return j;
 };
@@ -139,6 +152,9 @@ const create = asyncHandler(async (req, res) => {
   // creates are completely unaffected (req.teamMember is only set when the
   // request came in on the team-portal auth path).
   if (req.teamMember) {
+    // BD/staff submissions always go for review — enforce the global image rule.
+    const imgErr = validateImagesForSubmit(data);
+    if (imgErr) return fail(res, imgErr, 400);
     data.status = 'pending_review';
     data.createdByTeamMemberId = req.teamMember.id;
   }
@@ -229,12 +245,24 @@ const resubmit = asyncHandler(async (req, res) => {
   if (item.createdByTeamMemberId !== req.teamMember.id) return fail(res, 'Not your submission', 403);
   if (!['draft', 'archived'].includes(item.status)) return fail(res, 'This experience is not awaiting resubmission', 400);
 
+  const imgErr = validateImagesForSubmit(item);
+  if (imgErr) return fail(res, imgErr, 400);
+
+  const isFollowUp = item.reviewStage === 'follow_up' || (item.reviewSections && Object.keys(item.reviewSections).length);
+  // Require a resolution note for every objected section before it can go back.
+  const { error: resErr, resolutions } = buildRoundResolutions(item, req.body?.resolutions);
+  if (resErr) return fail(res, resErr, 400);
+
   item.status = 'pending_review';
   item.reviewNote = null;
   // "Review again" after a follow-up: keep the sections COPS already approved,
   // drop the objected ones back to pending, and mark it as a follow-up round
   // so it lands in the queue's Follow-up lane.
-  if (item.reviewStage === 'follow_up' || (item.reviewSections && Object.keys(item.reviewSections).length)) {
+  if (isFollowUp) {
+    item.reviewResolutions = resolutions;
+    // Log the submitter's replies into the persistent per-section chat (against
+    // the round they answer — before the round counter is bumped below).
+    item.reviewThread = logResolutions(item.reviewThread, resolutions, item.reviewRound || 0);
     item.reviewSections = resetForNewRound(item.reviewSections);
     item.reviewStage = 'resubmitted';
     item.reviewRound = (item.reviewRound || 0) + 1;

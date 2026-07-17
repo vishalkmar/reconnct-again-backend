@@ -48,6 +48,14 @@ const migrate = async () => {
   await addColumnIfMissing('experiences', 'reviewSuggestion', 'TEXT NULL', changes);
   await addColumnIfMissing('experiences', 'reviewRound', 'INT NOT NULL DEFAULT 0', changes);
   await addColumnIfMissing('experiences', 'reviewStage', 'VARCHAR(24) NULL', changes);
+  // Snapshot of section content at the last follow-up (baseline for the diff),
+  // and the submitter's per-objection resolution notes for the current round.
+  await addColumnIfMissing('experiences', 'reviewSnapshot', 'JSON NULL', changes);
+  await addColumnIfMissing('experiences', 'reviewResolutions', 'JSON NULL', changes);
+  // Persistent per-section objection⇄resolution history across every round.
+  await addColumnIfMissing('experiences', 'reviewThread', 'JSON NULL', changes);
+  // The QCOPS physical-visit + feedback lifecycle (see utils/qcFeedback).
+  await addColumnIfMissing('experiences', 'qcReview', 'JSON NULL', changes);
   return { changes };
 };
 

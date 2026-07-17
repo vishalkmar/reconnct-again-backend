@@ -39,6 +39,51 @@ const SECTIONS = [
 const SECTION_KEYS = SECTIONS.map((s) => s.key);
 const LABEL_BY_KEY = Object.fromEntries(SECTIONS.map((s) => [s.key, s.label]));
 
+// Which experience fields make up each section — used to snapshot a section's
+// content at objection time and later diff it against the current values.
+const SECTION_FIELDS = {
+  basic: ['name', 'location', 'city', 'nearbyLocation', 'mode', 'rating'],
+  taxonomy: ['audiences', 'categoryIds', 'typeIds'],
+  supplier: ['supplierId', 'showSupplierPublic'],
+  about: ['about'],
+  media: ['mainImage', 'gallery', 'videos'],
+  pricing: ['priceMethod', 'pricing', 'gstRate', 'discount', 'convenienceFee', 'currency'],
+  duration: ['pricing.duration'],
+  schedule: ['schedule'],
+  inclusions: ['inclusions'],
+  facilities: ['facilities'],
+  nearby: ['nearbyPlaces'],
+  faqs: ['faqs'],
+  policies: ['termsConditions', 'privacyPolicy', 'refundCancellationPolicy', 'refundPolicy', 'cancellationPolicy'],
+};
+
+// Read a possibly-dotted path ('pricing.duration') off an object.
+const readPath = (obj, path) => path.split('.').reduce((o, k) => (o == null ? undefined : o[k]), obj);
+
+// The subset of an experience that a section covers (for snapshot / diff).
+const extractSectionFields = (exp, key) => {
+  const e = toPlain(exp);
+  const out = {};
+  for (const f of SECTION_FIELDS[key] || []) out[f] = readPath(e, f);
+  return out;
+};
+
+// Snapshot every applicable section's fields (the baseline for a later diff).
+const snapshotSections = (exp) => {
+  const e = toPlain(exp);
+  const snap = {};
+  for (const s of applicableSections(e)) snap[s.key] = extractSectionFields(e, s.key);
+  return snap;
+};
+
+const deepEqual = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+// Did a section's content change vs a snapshot taken earlier?
+const sectionChanged = (exp, key, snapshot) => {
+  if (!snapshot || !snapshot[key]) return true; // no baseline → treat as changed
+  return !deepEqual(extractSectionFields(exp, key), snapshot[key]);
+};
+
 // Resolve the experience to a plain object regardless of whether a Sequelize
 // instance or a POJO was passed.
 const toPlain = (exp) => (exp && typeof exp.toJSON === 'function' ? exp.toJSON() : exp || {});
@@ -50,6 +95,12 @@ const applicableSections = (exp) => {
     try { return s.present(e); } catch { return false; }
   }).map((s) => ({ key: s.key, label: s.label }));
 };
+
+// Objection entries straight off reviewSections — no applicability check, so
+// it works even when only the reviewSections column is loaded (stats queries).
+const objectionEntries = (reviewSections) => Object.entries(reviewSections || {})
+  .filter(([, v]) => v && v.decision === 'objection')
+  .map(([key, v]) => ({ key, label: LABEL_BY_KEY[key] || key, objection: v.objection || '' }));
 
 const decisionOf = (reviewSections, key) => {
   const entry = reviewSections && reviewSections[key];
@@ -97,7 +148,57 @@ const resetForNewRound = (reviewSections) => {
   return out;
 };
 
+// Validate the submitter's per-objection resolution notes and build the
+// reviewResolutions map for the round they're sending back. `provided` is
+// { [sectionKey]: note }. Every currently-objected section needs a note.
+// Returns { error } OR { resolutions, objectedKeys }.
+const buildRoundResolutions = (exp, provided) => {
+  const e = toPlain(exp);
+  const rs = e.reviewSections || {};
+  const snap = e.reviewSnapshot || null;
+  const objectedKeys = Object.keys(rs).filter((k) => rs[k] && rs[k].decision === 'objection');
+  const out = {};
+  for (const key of objectedKeys) {
+    const note = String((provided && provided[key]) || '').trim();
+    if (!note) return { error: `Explain how you addressed the objection on "${LABEL_BY_KEY[key] || key}" before sending it back.` };
+    out[key] = {
+      objection: rs[key].objection || '',
+      note,
+      at: new Date().toISOString(),
+      changed: sectionChanged(e, key, snap),
+    };
+  }
+  return { resolutions: out, objectedKeys };
+};
+
+// ── Per-section chat thread (persistent across rounds) ──
+const threadAppend = (thread, key, entry) => {
+  const t = { ...(thread || {}) };
+  t[key] = [...(t[key] || []), entry];
+  return t;
+};
+
+// Log COPS's objections for this round into the thread (called at follow-up).
+const logObjections = (thread, reviewSections, round) => {
+  let t = thread || {};
+  for (const o of objectionEntries(reviewSections)) {
+    t = threadAppend(t, o.key, { round, role: 'cops', text: o.objection, at: new Date().toISOString() });
+  }
+  return t;
+};
+
+// Log the submitter's resolutions for this round (called at review-again).
+const logResolutions = (thread, resolutions, round) => {
+  let t = thread || {};
+  for (const [key, r] of Object.entries(resolutions || {})) {
+    t = threadAppend(t, key, { round, role: 'submitter', text: r.note, at: r.at || new Date().toISOString(), changed: !!r.changed });
+  }
+  return t;
+};
+
 module.exports = {
-  SECTIONS, SECTION_KEYS, LABEL_BY_KEY,
-  applicableSections, decisionOf, summarize, resetForNewRound,
+  SECTIONS, SECTION_KEYS, LABEL_BY_KEY, SECTION_FIELDS,
+  applicableSections, decisionOf, summarize, resetForNewRound, objectionEntries,
+  extractSectionFields, snapshotSections, sectionChanged, buildRoundResolutions,
+  logObjections, logResolutions,
 };

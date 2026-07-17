@@ -61,6 +61,20 @@ const Experience = sequelize.define(
     // Where the item sits in the granular pipeline: submitted | in_review |
     // follow_up (back with the submitter) | resubmitted (back at COPS).
     reviewStage: { type: DataTypes.STRING(24), allowNull: true },
+    // Snapshot of each section's fields captured at the last follow-up — the
+    // baseline the submitter's fixes are diffed against.
+    reviewSnapshot: { type: DataTypes.JSON, allowNull: true },
+    // Submitter's per-objection resolution notes for the round they just sent
+    // back: { [sectionKey]: { objection, note, at, changed } } — shown to COPS.
+    reviewResolutions: { type: DataTypes.JSON, allowNull: true },
+    // Persistent per-section chat history across rounds:
+    //   { [sectionKey]: [ { round, role:'cops'|'submitter', text, at, changed? } ] }
+    reviewThread: { type: DataTypes.JSON, allowNull: true },
+    // QCOPS physical-visit + feedback lifecycle (post section-approval gate):
+    //   { status, visitDate, visitTime, instructions, assignedByCopsId,
+    //     assignedAt, acknowledgedAt, onsiteConfirmedAt, feedback,
+    //     feedbackSubmittedAt, decision, decisionReason, decidedByCopsId, decidedAt }
+    qcReview: { type: DataTypes.JSON, allowNull: true },
     // Whether the supplier's info is shown publicly (website + app). Admin toggle.
     showSupplierPublic: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: true },
 

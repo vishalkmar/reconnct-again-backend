@@ -6,6 +6,7 @@ const {
 const { ok, fail } = require('../utils/response');
 const {
   applicableSections, decisionOf, summarize, SECTION_KEYS, LABEL_BY_KEY,
+  snapshotSections, logObjections,
 } = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
 
@@ -60,12 +61,21 @@ const withSource = async (items) => {
       j.source = { kind: 'admin', label: 'Admin' };
     }
     // Compact per-section rollup + which pipeline lane this belongs in.
+    const stage = j.reviewStage || 'submitted';
+    const qcLike = stage === 'approved' || stage.startsWith('qc_');
     j.review = {
-      stage: j.reviewStage || 'submitted',
+      stage,
       round: j.reviewRound || 0,
-      // "Follow-up" lane = it came back after the submitter fixed objections.
-      lane: j.reviewStage === 'resubmitted' ? 'followup' : 'new',
+      // Lanes: qc (content-approved, in the QCOPS visit flow), followup (came
+      // back after the submitter fixed objections), new (fresh content review).
+      lane: qcLike ? 'qc' : (stage === 'resubmitted' ? 'followup' : 'new'),
       summary: summarize(j),
+      qc: j.qcReview ? {
+        status: j.qcReview.status,
+        visitDate: j.qcReview.visitDate,
+        visitTime: j.qcReview.visitTime,
+        recommendation: j.qcReview.feedback?.recommendation,
+      } : null,
     };
     return j;
   });
@@ -119,12 +129,21 @@ const findReviewable = async (id) => {
 const reviewMeta = async (item) => {
   const j = item.toJSON ? item.toJSON() : item;
   const rs = j.reviewSections || {};
-  const sections = applicableSections(j).map((s) => ({
-    key: s.key,
-    label: s.label,
-    decision: decisionOf(rs, s.key),
-    objection: rs[s.key]?.objection || '',
-  }));
+  const resolutions = j.reviewResolutions || {};
+  const thread = j.reviewThread || {};
+  const sections = applicableSections(j).map((s) => {
+    const res = resolutions[s.key];
+    return {
+      key: s.key,
+      label: s.label,
+      decision: decisionOf(rs, s.key),
+      objection: rs[s.key]?.objection || '',
+      // If this section was objected last round, what the submitter said/did.
+      resolution: res ? { prevObjection: res.objection || '', note: res.note || '', changed: !!res.changed, at: res.at } : null,
+      // Full objection⇄resolution history for this section across rounds.
+      thread: thread[s.key] || [],
+    };
+  });
   const summary = summarize(j);
   const withSrc = (await withSource([item]))[0];
   return {
@@ -201,24 +220,25 @@ const finalApprove = asyncHandler(async (req, res) => {
     return fail(res, `Every section must be approved first — ${s.pending} pending, ${s.objection} with objections`, 400);
   }
 
-  item.status = 'published';
-  item.isActive = true;
+  // Content review passed — NOT live yet. This only unlocks the QCOPS on-site
+  // quality check (the real go-live gate). The item stays in the queue with
+  // its QCOPS button now enabled.
   item.reviewStage = 'approved';
+  item.isActive = false; // still not live — the QCOPS visit is the go-live gate
   item.reviewedByTeamMemberId = req.teamMember ? req.teamMember.id : null;
   item.reviewedAt = new Date();
   item.reviewNote = null;
-  if (item.ownerUserId || item.supplierId) item.data = { ...(item.data || {}), hostStatus: 'approved' };
   await item.save();
 
   await reviewNotify.notifySubmitter(item, {
-    kind: 'approved',
-    title: 'Experience approved 🎉',
-    message: `"${item.name}" passed review and is now live.`,
+    kind: 'section_approved',
+    title: `"${item.name}" passed content review`,
+    message: 'It now awaits an on-site quality check before it goes live.',
     meta: { experienceName: item.name },
   }).catch(() => {});
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
-  return ok(res, { item: (await withSource([full]))[0] }, 'Experience approved and published');
+  return ok(res, { item: (await withSource([full]))[0] }, 'Content approved — send it for an on-site QCOPS check to go live');
 });
 
 // POST /api/team/review-queue/:id/follow-up  { suggestion? }
@@ -235,6 +255,12 @@ const followUp = asyncHandler(async (req, res) => {
   if (req.body?.suggestion !== undefined) {
     item.reviewSuggestion = String(req.body.suggestion || '').trim() || null;
   }
+  // Snapshot the current section content so the submitter's fixes can be
+  // diffed against what COPS actually objected to. Clear last round's notes.
+  item.reviewSnapshot = snapshotSections(item);
+  item.reviewResolutions = null;
+  // Log COPS's objections for this round into the persistent per-section chat.
+  item.reviewThread = logObjections(item.reviewThread, item.reviewSections, item.reviewRound || 0);
   // Back to the submitter, out of the active queue. reviewStage marks it as
   // "with the submitter"; the objections live on reviewSections.
   item.status = 'draft';
@@ -326,34 +352,49 @@ const pickLeastLoadedQcops = async () => {
   return qcops[best];
 };
 
-// POST /api/team/review-queue/:id/send-qcops  { note }
-// One click → auto-assign the least-loaded QCOPS (round-robin) with the reason
-// COPS entered. The item stays in the queue but is now scoped to that QCOPS.
+// POST /api/team/review-queue/:id/send-qcops  { visitDate, visitTime, instructions }
+// Only after the content review is fully approved. Auto-assigns the least-loaded
+// QCOPS (round-robin) and schedules an on-site visit with instructions.
 const sendQcops = asyncHandler(async (req, res) => {
   const item = await findReviewable(req.params.id);
   if (item === null) return fail(res, 'Experience not found', 404);
   if (item === undefined) return fail(res, 'This experience is not awaiting review', 400);
 
-  const note = String(req.body?.note || '').trim();
-  if (!note) return fail(res, 'Describe the problem before sending it to QCOPS', 400);
+  if (item.reviewStage !== 'approved') {
+    return fail(res, 'Finish the content review (Final Approve) before scheduling a QCOPS visit', 400);
+  }
+
+  const visitDate = String(req.body?.visitDate || '').trim();
+  const visitTime = String(req.body?.visitTime || '').trim();
+  const instructions = String(req.body?.instructions || '').trim();
+  if (!visitDate || !visitTime) return fail(res, 'Choose a visit date and time', 400);
+  if (!instructions) return fail(res, 'Add instructions for the QCOPS visit', 400);
 
   const qcops = await pickLeastLoadedQcops();
   if (!qcops) return fail(res, 'No active QCOPS account is available', 400);
 
   item.qcopsTeamMemberId = qcops.id;
-  item.data = { ...(item.data || {}), qcopsNote: note, qcopsSentAt: new Date().toISOString() };
+  item.reviewStage = 'qc_assigned';
+  item.qcReview = {
+    status: 'assigned',
+    visitDate,
+    visitTime,
+    instructions,
+    assignedByCopsId: req.teamMember ? req.teamMember.id : null,
+    assignedAt: new Date().toISOString(),
+  };
   await item.save();
 
   await reviewNotify.notify({
     recipientType: 'team', recipientId: qcops.id, experienceId: item.id,
     kind: 'qcops',
-    title: `Assigned for quality check: "${item.name}"`,
-    message: note,
-    meta: { experienceName: item.name, from: req.teamMember ? req.teamMember.id : null },
+    title: `On-site quality check assigned: "${item.name}"`,
+    message: `Visit on ${visitDate} at ${visitTime}. ${instructions}`,
+    meta: { experienceName: item.name, visitDate, visitTime, instructions },
   }).catch(() => {});
   reviewNotify.emitQueueChanged({ experienceId: item.id });
 
-  return ok(res, { qcops: { id: qcops.id, name: qcops.name, employeeCode: qcops.employeeCode } }, `Sent to QCOPS — ${qcops.name}`);
+  return ok(res, { qcops: { id: qcops.id, name: qcops.name, employeeCode: qcops.employeeCode } }, `Assigned to QCOPS — ${qcops.name}`);
 });
 
 // POST /api/team/review-queue/:id/assign-qcops  { qcopsTeamMemberId }
