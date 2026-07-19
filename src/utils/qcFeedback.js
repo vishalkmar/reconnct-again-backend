@@ -19,7 +19,10 @@ const QC_FEEDBACK_FIELDS = [
   { key: 'accessibility', label: 'Accessibility (parking, entry, signage)', type: 'rating', required: false },
   { key: 'valueForMoney', label: 'Is the pricing fair for what’s offered?', type: 'boolean', required: true },
   { key: 'overallRating', label: 'Overall quality rating', type: 'rating', required: true },
-  { key: 'recommendation', label: 'Your recommendation', type: 'select', options: ['approve', 'needs_improvement', 'reject'], required: true },
+  { key: 'recommendation', label: 'Your recommendation', type: 'select', options: ['approved', 'approved_minor', 'approved_major'], required: true },
+  // Required ONLY when the recommendation is minor/major changes — describes
+  // exactly which changes are needed (validated conditionally below).
+  { key: 'changeDetails', label: 'Which changes are needed?', type: 'text', required: false, showWhen: { recommendation: ['approved_minor', 'approved_major'] } },
   { key: 'comments', label: 'Additional comments / observations', type: 'text', required: false },
 ];
 
@@ -50,6 +53,10 @@ const validateQcFeedback = (input) => {
     } else {
       out[f.key] = String(v).slice(0, 2000);
     }
+  }
+  // Conditional: minor/major recommendation MUST describe the changes.
+  if (['approved_minor', 'approved_major'].includes(out.recommendation) && !out.changeDetails) {
+    return { error: 'Describe which changes are needed for this recommendation' };
   }
   return { feedback: out };
 };

@@ -306,6 +306,16 @@ const getMine = asyncHandler(async (req, res) => {
 const createMine = asyncHandler(async (req, res) => {
   const form = req.body.form || req.body || {};
   const submit = !!req.body.submit; // true → "Submit for Review"
+  // Supplier self-serve gate: a supplier can only add a listing once they
+  // already have at least one live listing on the platform (the first is
+  // onboarded by a BD). Hosts are unaffected.
+  if (req.supplier) {
+    const liveCount = await Experience.count({ where: { supplierId: req.supplier.id, status: 'published', isActive: true } });
+    if (liveCount === 0) {
+      return fail(res, 'You can add your own listings only after your first experience is live. Please contact your account manager.', 403);
+    }
+  }
+
   const data = setOwner(req, mapFormToExperience(form));
   if (submit) {
     const imgErr = validateImagesForSubmit(data);
@@ -314,6 +324,9 @@ const createMine = asyncHandler(async (req, res) => {
   data.status = 'draft';    // host listings never auto-publish
   data.isActive = false;    // hidden from the public catalog until approved
   data.data.hostStatus = submit ? 'pending' : 'draft';
+  // Signature: this came from the supplier's own dashboard (enables the COPS
+  // "list directly / QCOPS optional" path for already-onboarded suppliers).
+  if (req.supplier) data.data.submittedVia = 'supplier_portal';
   data.slug = await uniqueSlug(form.slug || data.name);
   const row = await Experience.create(data);
   if (row.supplierId) ensureAccountManagerAssigned(row.supplierId).catch(() => {});
@@ -437,7 +450,12 @@ const summary = asyncHandler(async (req, res) => {
     };
   });
 
+  // A SUPPLIER may self-add listings only once they already have a live one on
+  // the platform (their first is onboarded by a BD). Hosts are unaffected.
+  const canAddListing = req.supplier ? activeCount > 0 : true;
+
   return ok(res, {
+    canAddListing,
     stats: {
       listingCount,
       activeCount,

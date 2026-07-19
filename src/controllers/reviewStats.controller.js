@@ -1,8 +1,100 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
-const { Experience } = require('../models');
-const { ok } = require('../utils/response');
+const { Experience, Supplier } = require('../models');
+const { ok, fail } = require('../utils/response');
 const { objectionEntries } = require('../utils/reviewSections');
+const { submitterTab, SUBMITTER_TABS } = require('../utils/experienceStatus');
+
+// GET /api/team/review-stats/my-suppliers — the BD's onboarded suppliers with
+// top stats + each supplier's listing counts by tab (drives the enhanced
+// Suppliers tab).
+const mySuppliers = asyncHandler(async (req, res) => {
+  const suppliers = await Supplier.findAll({ where: { createdByTeamMemberId: req.teamMember.id }, order: [['createdAt', 'DESC']] });
+  const ids = suppliers.map((s) => s.id);
+  const exps = ids.length
+    ? await Experience.findAll({ where: { supplierId: ids }, attributes: ['id', 'supplierId', 'status', 'isActive', 'reviewStage', 'data'] })
+    : [];
+  const now = new Date();
+  const items = suppliers.map((s) => {
+    const own = exps.filter((e) => e.supplierId === s.id);
+    const listingCounts = Object.fromEntries(SUBMITTER_TABS.map((t) => [t, 0]));
+    own.forEach((e) => { listingCounts[submitterTab(e)] += 1; });
+    return { ...s.toSafeJSON(), listingCounts, totalListings: own.length };
+  });
+  const stats = {
+    total: suppliers.length,
+    thisMonth: suppliers.filter((s) => { const d = new Date(s.createdAt); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear(); }).length,
+    active: suppliers.filter((s) => s.isActive).length,
+    withLive: items.filter((s) => s.listingCounts.live > 0).length,
+  };
+  return ok(res, { items, stats });
+});
+
+// GET /api/team/review-stats/my-suppliers/:supplierId/experiences — one of the
+// BD's suppliers' listings, tab-bucketed.
+const mySupplierExperiences = asyncHandler(async (req, res) => {
+  const supplier = await Supplier.findByPk(req.params.supplierId);
+  if (!supplier) return fail(res, 'Supplier not found', 404);
+  if (supplier.createdByTeamMemberId !== req.teamMember.id) return fail(res, 'This supplier is not yours', 403);
+  const rows = await Experience.findAll({ where: { supplierId: supplier.id }, order: [['updatedAt', 'DESC']] });
+  const items = rows.map((r) => {
+    const j = r.toJSON();
+    return {
+      id: j.id, name: j.name, mainImage: j.mainImage, location: j.location || j.city || '',
+      tab: submitterTab(j), reviewStage: j.reviewStage, reviewNote: j.reviewNote || null,
+      delistReason: (j.data && j.data.delistReason) || null, createdAt: j.createdAt,
+    };
+  });
+  const counts = Object.fromEntries(SUBMITTER_TABS.map((t) => [t, items.filter((i) => i.tab === t).length]));
+  counts.all = items.length;
+  return ok(res, { supplier: supplier.toSafeJSON(), items, counts });
+});
+
+// GET /api/team/review-stats/my-experiences — the member's own experiences
+// bucketed into the submitter tabs (In Queue / Under Progress / Live /
+// Rejected / Delisted) with everything the tabbed board + filters need.
+const myExperiences = asyncHandler(async (req, res) => {
+  const rows = await Experience.findAll({
+    where: { createdByTeamMemberId: req.teamMember.id },
+    include: [{ model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'email'] }],
+    order: [['updatedAt', 'DESC']],
+  });
+  const items = rows.map((r) => {
+    const j = r.toJSON();
+    const objs = objectionEntries(j.reviewSections);
+    return {
+      id: j.id,
+      name: j.name,
+      mainImage: j.mainImage,
+      location: j.location || j.city || '',
+      supplier: j.supplier ? { id: j.supplier.id, name: j.supplier.companyName, email: j.supplier.email } : null,
+      tab: submitterTab(j),
+      reviewStage: j.reviewStage,
+      round: j.reviewRound || 0,
+      objections: objs,
+      objectionCount: objs.length,
+      reviewNote: j.reviewNote || null,
+      suggestion: j.reviewSuggestion || null,
+      qc: j.qcReview ? {
+        status: j.qcReview.status,
+        recommendation: j.qcReview.feedback?.recommendation,
+        visitDate: j.qcReview.visitDate,
+        changeType: j.qcReview.changeType || null,
+        changeDetails: j.qcReview.changeDetails || null,
+        upState: j.qcReview.upState || null,
+        bdReason: j.qcReview.bdReason || null,
+        bdDeadline: j.qcReview.bdDeadline || null,
+      } : null,
+      delistReason: (j.data && j.data.delistReason) || null,
+      createdAt: j.createdAt,
+      updatedAt: j.updatedAt,
+    };
+  });
+  const counts = {};
+  SUBMITTER_TABS.forEach((t) => { counts[t] = items.filter((i) => i.tab === t).length; });
+  counts.all = items.length;
+  return ok(res, { items, counts });
+});
 
 const CARD_ATTRS = ['id', 'name', 'mainImage', 'location', 'status', 'reviewStage', 'reviewRound',
   'reviewSections', 'reviewSuggestion', 'reviewNote', 'supplierId', 'createdByTeamMemberId', 'ownerUserId', 'data'];
@@ -113,4 +205,4 @@ const queue = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { mine, queue };
+module.exports = { mine, queue, myExperiences, mySuppliers, mySupplierExperiences };

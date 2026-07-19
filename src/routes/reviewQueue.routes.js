@@ -7,6 +7,7 @@ const c = require('../controllers/reviewQueue.controller');
 router.use(authenticateStaff, requireStaffPermission('canReviewListings'));
 
 router.get('/', c.list);
+router.get('/board', c.board);
 router.get('/qcops-options', c.qcopsOptions);
 router.get('/:id', c.getOne);
 
@@ -14,6 +15,7 @@ router.get('/:id', c.getOne);
 router.post('/:id/section', c.decideSection);
 router.put('/:id/suggestion', c.saveSuggestion);
 router.post('/:id/final-approve', c.finalApprove);
+router.post('/:id/direct-list', c.directList);
 router.post('/:id/follow-up', c.followUp);
 router.post('/:id/reject', c.reject);
 router.post('/:id/send-qcops', c.sendQcops);

@@ -8,7 +8,9 @@ const {
   applicableSections, decisionOf, summarize, SECTION_KEYS, LABEL_BY_KEY,
   snapshotSections, logObjections,
 } = require('../utils/reviewSections');
+const { copsTab, COPS_TABS } = require('../utils/experienceStatus');
 const reviewNotify = require('../services/reviewNotify.service');
+const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
 
 const INCLUDE = [
   { model: ExperienceCategory, as: 'category', attributes: ['id', 'name', 'slug', 'icon'] },
@@ -42,12 +44,17 @@ const isReviewable = (exp) => isStaffPending(exp) || isSelfServicePending(exp);
 const withSource = async (items) => {
   const teamIds = [...new Set(items.filter((e) => e.createdByTeamMemberId).map((e) => e.createdByTeamMemberId))];
   const userIds = [...new Set(items.filter((e) => e.ownerUserId).map((e) => e.ownerUserId))];
-  const [members, users] = await Promise.all([
+  const supplierIds = [...new Set(items.filter((e) => e.supplierId).map((e) => e.supplierId))];
+  const [members, users, liveRows] = await Promise.all([
     teamIds.length ? TeamMember.findAll({ where: { id: teamIds }, attributes: ['id', 'name', 'employeeCode', 'roleType'] }) : [],
     userIds.length ? User.findAll({ where: { id: userIds }, attributes: ['id', 'name', 'email'] }) : [],
+    // How many LIVE listings each supplier already has → whether they're onboarded.
+    supplierIds.length ? Experience.findAll({ where: { supplierId: supplierIds, status: 'published', isActive: true }, attributes: ['id', 'supplierId'] }) : [],
   ]);
   const memberById = new Map(members.map((m) => [m.id, m]));
   const userById = new Map(users.map((u) => [u.id, u]));
+  const liveCount = new Map();
+  liveRows.forEach((r) => liveCount.set(r.supplierId, (liveCount.get(r.supplierId) || 0) + 1));
 
   return items.map((exp) => {
     const j = exp.toJSON ? exp.toJSON() : exp;
@@ -65,12 +72,23 @@ const withSource = async (items) => {
     // Compact per-section rollup + which pipeline lane this belongs in.
     const stage = j.reviewStage || 'submitted';
     const qcLike = stage === 'approved' || stage.startsWith('qc_');
+    const supplierOnboarded = j.supplierId ? (liveCount.get(j.supplierId) || 0) > 0 : false;
+    const fromSupplierPortal = j.data && j.data.submittedVia === 'supplier_portal';
+    j.supplierOnboarded = supplierOnboarded;
     j.review = {
       stage,
       round: j.reviewRound || 0,
       // Lanes: qc (content-approved, in the QCOPS visit flow), followup (came
       // back after the submitter fixed objections), new (fresh content review).
       lane: qcLike ? 'qc' : (stage === 'resubmitted' ? 'followup' : 'new'),
+      // The COPS-level tab (level1|level2|live_in_progress|under_progress|…).
+      copsTab: copsTab(j),
+      // An already-onboarded supplier (has a live listing) → COPS may list it
+      // directly, QCOPS optional — whether it came from the supplier portal OR a
+      // BD. The FIRST (not-onboarded) listing always goes through QCOPS.
+      fromSupplierPortal: !!fromSupplierPortal,
+      supplierOnboarded,
+      canDirectList: supplierOnboarded && stage === 'approved',
       summary: summarize(j),
       qc: j.qcReview ? {
         status: j.qcReview.status,
@@ -107,6 +125,23 @@ const list = asyncHandler(async (req, res) => {
   return ok(res, { items: await withSource(items) });
 });
 
+// GET /api/team/review-queue/board — every experience that has entered the
+// pipeline, bucketed into the COPS levels (Level 1 / Level 2 / Live in progress
+// / Under Progress / Active / Rejected / Delisted) + counts. A QCOPS-role member
+// only sees items escalated to them.
+const board = asyncHandler(async (req, res) => {
+  const where = {};
+  if (req.teamMember && req.teamMember.roleType === 'qcops') where.qcopsTeamMemberId = req.teamMember.id;
+  const rows = await Experience.findAll({ where, include: INCLUDE, order: [['updatedAt', 'DESC']] });
+  // Skip plain drafts that never entered review (admin scratch drafts).
+  const inPipeline = rows.filter((r) => r.status !== 'draft' || r.reviewStage || (r.data && r.data.hostStatus === 'pending'));
+  const items = await withSource(inPipeline);
+  const counts = Object.fromEntries(COPS_TABS.map((t) => [t, 0]));
+  items.forEach((i) => { counts[i.review.copsTab] = (counts[i.review.copsTab] || 0) + 1; });
+  counts.all = items.length;
+  return ok(res, { items, counts });
+});
+
 // GET /api/team/review-queue/qcops-options — active QCOPS accounts, for the
 // "Assign to QCOPS" picker.
 const qcopsOptions = asyncHandler(async (req, res) => {
@@ -133,6 +168,7 @@ const reviewMeta = async (item) => {
   const rs = j.reviewSections || {};
   const resolutions = j.reviewResolutions || {};
   const thread = j.reviewThread || {};
+  const snapshot = j.reviewSnapshot || {};
   const sections = applicableSections(j).map((s) => {
     const res = resolutions[s.key];
     return {
@@ -142,12 +178,37 @@ const reviewMeta = async (item) => {
       objection: rs[s.key]?.objection || '',
       // If this section was objected last round, what the submitter said/did.
       resolution: res ? { prevObjection: res.objection || '', note: res.note || '', changed: !!res.changed, at: res.at } : null,
+      // The section's field values COPS last saw (baseline for a before/after diff).
+      before: res ? (snapshot[s.key] || null) : null,
       // Full objection⇄resolution history for this section across rounds.
       thread: thread[s.key] || [],
     };
   });
   const summary = summarize(j);
   const withSrc = (await withSource([item]))[0];
+
+  // Supplier-onboarding context so COPS can decide direct-list vs QCOPS — shown
+  // for ANY submission (BD/supplier/admin) whose supplier is already onboarded.
+  let existingLive = [];
+  let supplierInfo = null;
+  if (j.supplierId) {
+    const rows = await Experience.findAll({
+      where: { supplierId: j.supplierId, status: 'published', isActive: true },
+      include: [{ model: ExperienceCategory, as: 'category', attributes: ['id', 'name'] }],
+      attributes: ['id', 'name', 'location', 'city', 'nearbyLocation', 'createdByTeamMemberId', 'ownerUserId', 'data'],
+      limit: 50,
+    });
+    const viaOf = (r) => (r.data && r.data.submittedVia === 'supplier_portal' ? 'supplier' : (r.createdByTeamMemberId ? 'bd' : 'admin'));
+    existingLive = rows.slice(0, 12).map((r) => ({ id: r.id, name: r.name, location: r.location, city: r.city, nearbyLocation: r.nearbyLocation, category: r.category?.name || null, via: viaOf(r) }));
+    const fromPortal = rows.filter((r) => viaOf(r) === 'supplier').length;
+    const byBd = rows.filter((r) => viaOf(r) === 'bd').length;
+    const totalAll = await Experience.count({ where: { supplierId: j.supplierId } });
+    const supplierRow = j.supplier?.companyName ? null : await Supplier.findByPk(j.supplierId, { attributes: ['companyName'] });
+    supplierInfo = { companyName: j.supplier?.companyName || supplierRow?.companyName || null, live: rows.length, fromPortal, byBd, byAdmin: rows.length - fromPortal - byBd, total: totalAll };
+  }
+  const fromSupplierPortal = !!(j.data && j.data.submittedVia === 'supplier_portal');
+  const supplierOnboarded = existingLive.length > 0;
+
   return {
     id: j.id,
     stage: j.reviewStage || 'submitted',
@@ -158,6 +219,15 @@ const reviewMeta = async (item) => {
     source: withSrc.source,
     sections,
     summary,
+    fromSupplierPortal,
+    supplierOnboarded,
+    supplierInfo,
+    // Known/onboarded supplier → COPS may list directly (BD OR supplier source),
+    // QCOPS optional. The FIRST listing (not onboarded) always goes via QCOPS.
+    canDirectList: supplierOnboarded && j.reviewStage === 'approved',
+    existingLive,
+    thisVia: fromSupplierPortal ? 'supplier' : (j.createdByTeamMemberId ? 'bd' : (j.ownerUserId ? 'host' : 'admin')),
+    current: { location: j.location || '', city: j.city || '', nearbyLocation: j.nearbyLocation || '', category: (j.categoryItems && j.categoryItems[0]?.name) || null },
   };
 };
 
@@ -241,6 +311,40 @@ const finalApprove = asyncHandler(async (req, res) => {
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Content approved — send it for an on-site QCOPS check to go live');
+});
+
+// POST /api/team/review-queue/:id/direct-list — publish straight to live
+// (skipping QCOPS) for an ALREADY-ONBOARDED supplier after the content review
+// is done — whether the submission came from the supplier portal OR a BD.
+const directList = asyncHandler(async (req, res) => {
+  const item = await findReviewable(req.params.id);
+  if (item === null) return fail(res, 'Experience not found', 404);
+  if (item === undefined) return fail(res, 'This experience is not awaiting review', 400);
+  if (item.reviewStage !== 'approved') return fail(res, 'Finish the content review (Final Approve) first', 400);
+  const liveCount = item.supplierId
+    ? await Experience.count({ where: { supplierId: item.supplierId, status: 'published', isActive: true } })
+    : 0;
+  if (liveCount === 0) return fail(res, 'This supplier isn’t onboarded yet — send it to QCOPS instead', 400);
+
+  item.status = 'published';
+  item.isActive = true;
+  item.reviewStage = 'published';
+  item.reviewedByTeamMemberId = req.teamMember ? req.teamMember.id : null;
+  item.reviewedAt = new Date();
+  item.data = { ...(item.data || {}), hostStatus: 'approved' };
+  await item.save();
+  if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
+
+  await reviewNotify.notifySubmitter(item, {
+    kind: 'approved',
+    title: `"${item.name}" is now live 🎉`,
+    message: 'Listed directly by Center Ops — it’s published on the website and app.',
+    meta: { experienceName: item.name },
+  }).catch(() => {});
+  reviewNotify.emitQueueChanged({ experienceId: item.id });
+
+  const full = await Experience.findByPk(item.id, { include: INCLUDE });
+  return ok(res, { item: (await withSource([full]))[0] }, 'Listed directly — now live');
 });
 
 // POST /api/team/review-queue/:id/follow-up  { suggestion? }
@@ -394,6 +498,14 @@ const sendQcops = asyncHandler(async (req, res) => {
     message: `Visit on ${visitDate} at ${visitTime}. ${instructions}`,
     meta: { experienceName: item.name, visitDate, visitTime, instructions },
   }).catch(() => {});
+  // "First level approved" — tell the submitter it's cleared content review and
+  // is now in the on-site quality-check stage.
+  await reviewNotify.notifySubmitter(item, {
+    kind: 'section_approved',
+    title: `"${item.name}" cleared content review`,
+    message: 'It’s now in the on-site quality-check stage.',
+    meta: { experienceName: item.name },
+  }).catch(() => {});
   reviewNotify.emitQueueChanged({ experienceId: item.id });
 
   return ok(res, { qcops: { id: qcops.id, name: qcops.name, employeeCode: qcops.employeeCode } }, `Assigned to QCOPS — ${qcops.name}`);
@@ -420,7 +532,7 @@ const assignQcops = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  list, qcopsOptions, getOne, decideSection, saveSuggestion,
-  finalApprove, followUp, reject, requestChanges,
+  list, board, qcopsOptions, getOne, decideSection, saveSuggestion,
+  finalApprove, directList, followUp, reject, requestChanges,
   sendQcops, assignQcops, LABEL_BY_KEY,
 };

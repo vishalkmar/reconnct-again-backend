@@ -14,6 +14,7 @@ router.post('/', authenticateStaff, requireStaffPermission('canAddExperience'), 
 // controller). Duplicate/toggle/delete/reorder stay fully admin-only.
 router.put('/:id', authenticateStaff, c.update);
 router.post('/:id/resubmit', authenticateStaff, c.resubmit);
+router.post('/:id/up-respond', authenticateStaff, c.upRespond);
 router.post('/:id/duplicate', authenticate, c.duplicate);
 router.patch('/:id/toggle', authenticate, c.toggle);
 router.delete('/:id', authenticate, c.remove);

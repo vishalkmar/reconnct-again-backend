@@ -288,6 +288,43 @@ const resubmit = asyncHandler(async (req, res) => {
   return ok(res, { item: await withAudiences(full) }, 'Resubmitted for review');
 });
 
+// POST /api/experiences/:id/up-respond  { decision:'reject'|'approve', reason, deadline? }
+// The submitter's answer to a QCOPS minor/major-changes recommendation
+// (Under Progress). Either answer moves it to Center Ops to finalise.
+const upRespond = asyncHandler(async (req, res) => {
+  if (!req.teamMember) return fail(res, 'Only a team member can respond here', 400);
+  const item = await Experience.findByPk(req.params.id);
+  if (!item) return fail(res, 'Experience not found', 404);
+  if (item.createdByTeamMemberId !== req.teamMember.id) return fail(res, 'Not your submission', 403);
+  if (item.reviewStage !== 'under_progress') return fail(res, 'This experience is not in Under Progress', 400);
+
+  const decision = String(req.body?.decision || '');
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return fail(res, 'A reason is required', 400);
+
+  if (decision === 'reject') {
+    item.qcReview = { ...(item.qcReview || {}), upState: 'bd_rejected', bdReason: reason, bdRespondedAt: new Date().toISOString() };
+  } else if (decision === 'approve') {
+    const deadline = String(req.body?.deadline || '').trim();
+    if (!deadline) return fail(res, 'A completion deadline (date & time) is required', 400);
+    item.qcReview = { ...(item.qcReview || {}), upState: 'bd_approved', bdReason: reason, bdDeadline: deadline, bdRespondedAt: new Date().toISOString() };
+  } else {
+    return fail(res, 'decision must be reject or approve', 400);
+  }
+  await item.save();
+
+  await reviewNotify.notifyCopsTeam({
+    experienceId: item.id,
+    kind: 'under_progress',
+    title: `Under Progress response: "${item.name}"`,
+    message: decision === 'reject' ? `Submitter wants to reject — ${reason}` : `Submitter accepted the changes (deadline set).`,
+    meta: { decision, reason },
+  }).catch(() => {});
+
+  const full = await Experience.findByPk(item.id, { include: INCLUDE });
+  return ok(res, { item: await withAudiences(full) }, 'Response submitted');
+});
+
 module.exports = {
-  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit,
+  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit, upRespond,
 };
