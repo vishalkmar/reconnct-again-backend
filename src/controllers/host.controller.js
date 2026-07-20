@@ -12,6 +12,30 @@ const {
 } = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
 const { validateImagesForSubmit } = require('../utils/experienceValidation');
+const { submitterTab } = require('../utils/experienceStatus');
+
+/*
+  Once a listing has been handed to Center Ops it stops being the owner's to
+  change — exactly like the BD flow, where a submitted experience has no Edit
+  action at all and edits only ever happen through the objection-resolution
+  round. Without this a supplier could quietly rewrite (or delete) a LIVE
+  listing that QCOPS already signed off on, bypassing review entirely.
+
+  Two windows stay open:
+    - never submitted  → a plain draft is still theirs to edit or throw away
+    - objections open  → the resolve page edits the objected fields and sends
+                         it back for another round
+*/
+const ownerStage = (row) => {
+  const hostStatus = (row.data && row.data.hostStatus) || 'draft';
+  const inFollowUp = hostStatus === 'changes' || row.reviewStage === 'follow_up';
+  const neverSubmitted = row.status === 'draft' && hostStatus === 'draft' && !row.reviewStage;
+  return {
+    canEdit: neverSubmitted || inFollowUp,
+    canDelete: neverSubmitted,
+    inFollowUp,
+  };
+};
 
 // This whole controller is shared by TWO routers: /api/host/* (a signed-in
 // User, "Switch to Hosting" — req.user, unchanged) and /api/supplier/* (a
@@ -238,6 +262,13 @@ const toHostListing = (exp) => {
     })(),
     reviewNote: j.reviewNote || null,
     reviewSuggestion: j.reviewSuggestion || null,
+    // Which owner-facing tab this belongs in — the SAME derivation the BD's
+    // "My Experiences" board uses, so both audiences bucket identically.
+    tab: submitterTab(j),
+    // Whether the owner may still change it (see ownerStage). Mirrored by the
+    // server-side guards on updateMine/removeMine — the UI just hides what
+    // would be rejected anyway.
+    ...ownerStage(j),
     createdAt: j.createdAt,
     updatedAt: j.updatedAt,
   };
@@ -341,6 +372,9 @@ const createMine = asyncHandler(async (req, res) => {
 const updateMine = asyncHandler(async (req, res) => {
   const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
   if (!row) return fail(res, 'Listing not found', 404);
+  if (!ownerStage(row).canEdit) {
+    return fail(res, 'This listing has already been submitted for review and can no longer be edited here. Please contact your account manager.', 403);
+  }
   const form = req.body.form || req.body || {};
   const data = mapFormToExperience(form);
   // Keep it host-owned + unpublished; only the admin can flip status/isActive.
@@ -391,6 +425,9 @@ const updateMine = asyncHandler(async (req, res) => {
 const removeMine = asyncHandler(async (req, res) => {
   const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
   if (!row) return fail(res, 'Listing not found', 404);
+  if (!ownerStage(row).canDelete) {
+    return fail(res, 'This listing is already in the review pipeline and cannot be deleted here. Please contact your account manager to have it delisted.', 403);
+  }
   await row.destroy();
   return ok(res, {}, 'Listing deleted');
 });
