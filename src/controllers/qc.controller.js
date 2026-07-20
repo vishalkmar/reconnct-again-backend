@@ -199,6 +199,41 @@ const goLive = asyncHandler(async (req, res) => {
   return ok(res, { item: item.toJSON() }, 'Published — now live on web & app');
 });
 
+/*
+  POST /api/team/qc/:id/up-ack — Center Ops's "Got it" on an Under Progress
+  response. Half of a two-way handshake: the submitter (BD) can see their
+  answer was actually picked up, rather than guessing. Purely an
+  acknowledgement — it does NOT decide anything, so the Live it Now / Reject
+  buttons stay exactly as they were.
+*/
+const upAck = asyncHandler(async (req, res) => {
+  const item = await findQc(req.params.id);
+  if (!item) return fail(res, 'Not found', 404);
+  if (item.reviewStage !== 'under_progress') return fail(res, 'This item is not in Under Progress', 400);
+  const qc = item.qcReview || {};
+  if (!['bd_approved', 'bd_rejected'].includes(qc.upState)) {
+    return fail(res, 'There is no submitter response to acknowledge yet', 400);
+  }
+  if (qc.copsAck) return fail(res, 'Already acknowledged', 400);
+
+  const who = req.teamMember || null;
+  item.qcReview = {
+    ...qc,
+    copsAck: { at: new Date().toISOString(), byId: who ? who.id : null, byName: who ? who.name : 'Center Ops' },
+  };
+  await item.save();
+
+  await reviewNotify.notifySubmitter(item, {
+    kind: 'up_ack_cops',
+    title: `Center Ops acknowledged: "${item.name}"`,
+    message: `${who ? who.name : 'Center Ops'} has received your response.`,
+    meta: { experienceName: item.name, ackBy: 'cops' },
+  }).catch(() => {});
+  reviewNotify.emitQueueChanged({ experienceId: item.id });
+
+  return ok(res, { item: item.toJSON() }, 'Acknowledged — the submitter has been told');
+});
+
 // POST /api/team/qc/:id/up-reject  { reason? } — COPS finalises a rejection
 // out of the Under Progress lane (usually confirming the submitter's rejection).
 const upReject = asyncHandler(async (req, res) => {
@@ -325,5 +360,5 @@ const feedbackSchema = asyncHandler(async (req, res) => ok(res, { fields: QC_FEE
 
 module.exports = {
   mine, ack, onsite, submitFeedback, goLive, upReject, delist,
-  management, managementDetail, feedbackSchema,
+  management, managementDetail, feedbackSchema, upAck,
 };

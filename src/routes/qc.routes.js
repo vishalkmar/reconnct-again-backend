@@ -23,6 +23,7 @@ router.post('/:id/feedback', c.submitFeedback);
 
 // ── Center Ops decision + QCOPS management ──
 router.post('/:id/go-live', requireCops, c.goLive);
+router.post('/:id/up-ack', requireCops, c.upAck);
 router.post('/:id/up-reject', requireCops, c.upReject);
 router.post('/:id/delist', requireCops, c.delist);
 router.get('/management', requirePermission('canReviewListings'), c.management);

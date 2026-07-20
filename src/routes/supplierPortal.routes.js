@@ -16,6 +16,8 @@ router.get('/bookings/:id', ctrl.getBooking);
 router.get('/transactions', ctrl.listTransactions);
 router.post('/listings', ctrl.createMine);
 router.put('/listings/:id', ctrl.updateMine);
+// Supplier's written acknowledgement of post-QC changes (Under Progress).
+router.post('/listings/:id/up-ack', ctrl.upAckMine);
 router.delete('/listings/:id', ctrl.removeMine);
 router.get('/notifications', notificationCtrl.listForSupplier);
 // Supplier-only (no Host equivalent).

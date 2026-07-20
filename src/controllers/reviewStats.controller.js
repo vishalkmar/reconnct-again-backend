@@ -84,6 +84,10 @@ const myExperiences = asyncHandler(async (req, res) => {
         upState: j.qcReview.upState || null,
         bdReason: j.qcReview.bdReason || null,
         bdDeadline: j.qcReview.bdDeadline || null,
+        // Two-way handshake on the submitter's Under Progress response —
+        // did Center Ops pick it up, and did the supplier commit in writing?
+        copsAck: j.qcReview.copsAck || null,
+        supplierAck: j.qcReview.supplierAck || null,
       } : null,
       delistReason: (j.data && j.data.delistReason) || null,
       createdAt: j.createdAt,

@@ -321,6 +321,21 @@ const upRespond = asyncHandler(async (req, res) => {
     meta: { decision, reason },
   }).catch(() => {});
 
+  // Accepting the changes commits the SUPPLIER to doing the work, so they're
+  // told at the same moment as Center Ops and must acknowledge in writing.
+  // (A rejection never reaches them — nothing is being asked of them.)
+  if (decision === 'approve' && item.supplierId) {
+    await reviewNotify.notify({
+      recipientType: 'supplier',
+      recipientId: item.supplierId,
+      experienceId: item.id,
+      kind: 'up_supplier_request',
+      title: `Action needed on "${item.name}"`,
+      message: `${item.qcReview?.changeDetails || 'Changes were requested after the on-site check.'} Please confirm you've seen this.`,
+      meta: { experienceName: item.name, deadline: item.qcReview?.bdDeadline || null },
+    }).catch(() => {});
+  }
+
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: await withAudiences(full) }, 'Response submitted');
 });

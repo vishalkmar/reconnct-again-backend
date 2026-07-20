@@ -269,6 +269,17 @@ const toHostListing = (exp) => {
     })(),
     reviewNote: j.reviewNote || null,
     reviewSuggestion: j.reviewSuggestion || null,
+    // Post-QC changes the owner has been asked to make, and whether they've
+    // acknowledged them yet (see upAckMine). Null unless it's in that lane.
+    upChanges: j.reviewStage === 'under_progress' && j.qcReview ? {
+      changeType: j.qcReview.changeType || null,
+      changeDetails: j.qcReview.changeDetails || '',
+      deadline: j.qcReview.bdDeadline || null,
+      submitterNote: j.qcReview.bdReason || '',
+      upState: j.qcReview.upState || null,
+      needsAck: j.qcReview.upState === 'bd_approved' && !j.qcReview.supplierAck,
+      ack: j.qcReview.supplierAck || null,
+    } : null,
     // Which owner-facing tab this belongs in — the SAME derivation the BD's
     // "My Experiences" board uses, so both audiences bucket identically.
     tab: submitterTab(j),
@@ -429,6 +440,41 @@ const updateMine = asyncHandler(async (req, res) => {
 });
 
 // DELETE /api/host/listings/:id
+/*
+  POST /api/supplier/listings/:id/up-ack  { note }
+  The supplier's half of the Under Progress handshake. Once the submitter (BD)
+  accepts QCOPS's requested changes on their behalf, the supplier is the one
+  who actually has to do the work — so a bare "seen" button isn't enough here:
+  a written confirmation is REQUIRED, and it's surfaced back on the submitter's
+  card so there's a record of what the supplier committed to.
+*/
+const upAckMine = asyncHandler(async (req, res) => {
+  const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
+  if (!row) return fail(res, 'Listing not found', 404);
+  if (row.reviewStage !== 'under_progress') return fail(res, 'There is nothing to acknowledge on this listing', 400);
+
+  const qc = row.qcReview || {};
+  if (qc.upState !== 'bd_approved') return fail(res, 'There is nothing to acknowledge yet', 400);
+  if (qc.supplierAck) return fail(res, 'You have already acknowledged this', 400);
+
+  const note = String(req.body?.note || '').trim();
+  if (!note) return fail(res, 'Please write how you will address the requested changes', 400);
+
+  row.qcReview = { ...qc, supplierAck: { at: new Date().toISOString(), note } };
+  await row.save();
+
+  // Straight back to whoever submitted it (the BD) — plus Center Ops's queue.
+  await reviewNotify.notifySubmitter(row, {
+    kind: 'up_ack_supplier',
+    title: `Supplier acknowledged: "${row.name}"`,
+    message: note,
+    meta: { experienceName: row.name, ackBy: 'supplier', note },
+  }).catch(() => {});
+  reviewNotify.emitQueueChanged({ experienceId: row.id });
+
+  return ok(res, { listing: toHostListing(row) }, 'Acknowledgement sent');
+});
+
 const removeMine = asyncHandler(async (req, res) => {
   const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
   if (!row) return fail(res, 'Listing not found', 404);
@@ -553,4 +599,5 @@ const listTransactions = asyncHandler(async (req, res) => {
 
 module.exports = {
   listMine, getMine, createMine, updateMine, removeMine, summary, getBooking, listTransactions,
+  upAckMine,
 };
