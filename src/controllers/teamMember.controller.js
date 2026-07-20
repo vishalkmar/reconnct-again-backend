@@ -4,6 +4,7 @@ const {
   ROLE_TYPES, ROLE_LABELS, PERMISSION_KEYS, defaultPermissionsFor,
 } = require('../models/teamMember.model');
 const { ok, created, fail } = require('../utils/response');
+const { reassignOrphanedSuppliers } = require('../services/accountManager.service');
 
 const PREFIX = {
   bd: 'BD',
@@ -90,12 +91,20 @@ const update = asyncHandler(async (req, res) => {
   const { name, permissions, isActive, password } = req.body || {};
   if (name !== undefined) member.name = String(name).trim();
   if (permissions !== undefined) member.permissions = { ...member.permissions, ...permissions };
+  const wasActive = member.isActive;
   if (isActive !== undefined) member.isActive = !!isActive;
   if (password) {
     if (String(password).length < 6) return fail(res, 'Password must be at least 6 characters', 400);
     member.password = String(password);
   }
   await member.save();
+
+  // Disabling an account manager would otherwise strand their suppliers on a
+  // contact nobody can reach — hand those over to an active manager now, since
+  // the assign-on-first-listing hook never fires again for them.
+  if (wasActive && !member.isActive && member.roleType === 'account_manager') {
+    reassignOrphanedSuppliers().catch(() => {});
+  }
 
   return ok(res, { member: member.toSafeJSON() }, 'Team member updated');
 });
