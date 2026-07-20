@@ -21,18 +21,25 @@ const { submitterTab } = require('../utils/experienceStatus');
   round. Without this a supplier could quietly rewrite (or delete) a LIVE
   listing that QCOPS already signed off on, bypassing review entirely.
 
-  Two windows stay open:
-    - never submitted  → a plain draft is still theirs to edit or throw away
-    - objections open  → the resolve page edits the objected fields and sends
-                         it back for another round
+  Two distinct permissions, deliberately NOT the same flag:
+
+    canWrite — may the API accept an update at all. True for a plain draft AND
+      during an open objection round, because the resolve page saves the
+      objected sections through this same endpoint.
+
+    canEdit — may the owner open the free-form edit wizard. Draft only. During
+      an objection round the ONLY way to change anything is the resolve page,
+      section by section with a note per fix — exactly the BD flow, where a
+      submitted experience has no Edit action anywhere.
 */
 const ownerStage = (row) => {
   const hostStatus = (row.data && row.data.hostStatus) || 'draft';
   const inFollowUp = hostStatus === 'changes' || row.reviewStage === 'follow_up';
   const neverSubmitted = row.status === 'draft' && hostStatus === 'draft' && !row.reviewStage;
   return {
-    canEdit: neverSubmitted || inFollowUp,
+    canEdit: neverSubmitted,
     canDelete: neverSubmitted,
+    canWrite: neverSubmitted || inFollowUp,
     inFollowUp,
   };
 };
@@ -372,7 +379,7 @@ const createMine = asyncHandler(async (req, res) => {
 const updateMine = asyncHandler(async (req, res) => {
   const row = await Experience.findOne({ where: { id: req.params.id, ...ownerWhere(req) } });
   if (!row) return fail(res, 'Listing not found', 404);
-  if (!ownerStage(row).canEdit) {
+  if (!ownerStage(row).canWrite) {
     return fail(res, 'This listing has already been submitted for review and can no longer be edited here. Please contact your account manager.', 403);
   }
   const form = req.body.form || req.body || {};
