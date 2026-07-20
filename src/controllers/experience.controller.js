@@ -273,6 +273,13 @@ const resubmit = asyncHandler(async (req, res) => {
     item.reviewStage = 'resubmitted';
     item.reviewRound = (item.reviewRound || 0) + 1;
   }
+  // The follow-up marked data.hostStatus 'changes' for any supplier/host-linked
+  // row (that's what the owner's portal reads). The round is over now, so clear
+  // it — leaving it set kept a phantom "Objections" block on their card for the
+  // rest of the listing's life.
+  if (item.ownerUserId || item.supplierId) {
+    item.data = { ...(item.data || {}), hostStatus: 'pending' };
+  }
   await item.save();
 
   // Back in Center Ops's lap — ping the COPS team + live-refresh their queue.

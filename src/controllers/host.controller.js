@@ -34,7 +34,12 @@ const { submitterTab } = require('../utils/experienceStatus');
 */
 const ownerStage = (row) => {
   const hostStatus = (row.data && row.data.hostStatus) || 'draft';
-  const inFollowUp = hostStatus === 'changes' || row.reviewStage === 'follow_up';
+  // reviewStage is the canonical state; data.hostStatus is a legacy mirror
+  // that isn't always cleared when a round ends (a resubmitted BD listing kept
+  // 'changes' all the way to QCOPS). Trusting it here showed a phantom
+  // "Objections / Resolve" block — and worse, left the listing writable long
+  // after content review had passed.
+  const inFollowUp = row.reviewStage === 'follow_up';
   const neverSubmitted = row.status === 'draft' && hostStatus === 'draft' && !row.reviewStage;
   return {
     canEdit: neverSubmitted,
