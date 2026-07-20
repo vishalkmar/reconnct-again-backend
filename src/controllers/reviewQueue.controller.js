@@ -89,6 +89,11 @@ const withSource = async (items) => {
       fromSupplierPortal: !!fromSupplierPortal,
       supplierOnboarded,
       canDirectList: supplierOnboarded && stage === 'approved',
+      // Is the ball in COPS's court right now? While a follow-up sits with the
+      // submitter the item still shows in Level 1, but every review endpoint
+      // rejects it — so the UI must disable the Review action instead of
+      // letting it through to a 400 toast.
+      awaitingCops: isReviewable(j),
       summary: summarize(j),
       qc: j.qcReview ? {
         status: j.qcReview.status,

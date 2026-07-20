@@ -5,6 +5,7 @@ const {
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { validateQcFeedback, QC_FEEDBACK_FIELDS } = require('../utils/qcFeedback');
+const { istToInstant } = require('../utils/istTime');
 const reviewNotify = require('../services/reviewNotify.service');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
 
@@ -95,12 +96,15 @@ const onsite = asyncHandler(async (req, res) => {
   const { item, err } = await ownAssigned(req, req.params.id);
   if (err === 'notfound') return fail(res, 'Not found', 404);
   if (err === 'forbidden') return fail(res, 'Not your assignment', 403);
-  // Can only confirm on-site once the scheduled visit time has arrived.
+  // Unlocks AT the scheduled slot and stays unlocked from then on — a QCOPS
+  // who arrives late must still be able to confirm. Only "before the slot" is
+  // blocked. The slot is an IST wall clock, so resolve it explicitly rather
+  // than against the server's timezone (UTC in production).
   const qc = item.qcReview || {};
   if (qc.visitDate && qc.visitTime) {
-    const visitAt = new Date(`${qc.visitDate}T${qc.visitTime}`);
-    if (!Number.isNaN(visitAt.getTime()) && Date.now() < visitAt.getTime()) {
-      return fail(res, `You can confirm on-site only at your visit time (${qc.visitDate} ${qc.visitTime})`, 400);
+    const visitAt = istToInstant(qc.visitDate, qc.visitTime);
+    if (visitAt && Date.now() < visitAt.getTime()) {
+      return fail(res, `You can confirm on-site only from your visit time (${qc.visitDate} ${qc.visitTime})`, 400);
     }
   }
   item.qcReview = { ...(item.qcReview || {}), status: 'onsite', onsiteConfirmedAt: new Date().toISOString() };
