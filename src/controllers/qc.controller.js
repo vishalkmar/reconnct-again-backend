@@ -166,7 +166,7 @@ const publishLive = async (item, copsId) => {
   item.isActive = true;
   item.reviewStage = 'published';
   item.qcReview = { ...(item.qcReview || {}), status: 'approved', decision: 'approved', decidedByCopsId: copsId, decidedAt: new Date().toISOString() };
-  if (item.ownerUserId || item.supplierId) item.data = { ...(item.data || {}), hostStatus: 'approved' };
+  item.data = { ...(item.data || {}), listedAt: item.data?.listedAt || new Date().toISOString(), ...((item.ownerUserId || item.supplierId) ? { hostStatus: 'approved' } : {}) };
   await item.save();
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
   await reviewNotify.notifySubmitter(item, {
@@ -248,7 +248,7 @@ const delist = asyncHandler(async (req, res) => {
   item.status = 'archived';
   item.isActive = false;
   item.reviewStage = 'delisted';
-  item.data = { ...(item.data || {}), delistReason: reason, hostStatus: 'draft' };
+  item.data = { ...(item.data || {}), delistReason: reason, delistedAt: new Date().toISOString(), hostStatus: 'draft' };
   await item.save();
 
   await reviewNotify.notifySubmitter(item, {

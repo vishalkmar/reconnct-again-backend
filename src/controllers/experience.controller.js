@@ -54,7 +54,7 @@ const pickWritable = (body) => {
 const INCLUDE = [
   { model: ExperienceCategory, as: 'category', attributes: ['id', 'name', 'slug', 'icon', 'colorHex'] },
   { model: ExperienceType, as: 'type', attributes: ['id', 'name', 'slug', 'categoryId'] },
-  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'phone', 'email', 'image'] },
+  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'phone', 'email', 'image', 'createdAt'] },
 ];
 
 // Attach the hydrated audience/category/type objects (the row stores only ids).
@@ -325,6 +325,30 @@ const upRespond = asyncHandler(async (req, res) => {
   return ok(res, { item: await withAudiences(full) }, 'Response submitted');
 });
 
+// POST /api/experiences/:id/delist  { reason } — admin pulls a LIVE listing off
+// the platform (web + app) with a reason. Shows in everyone's Delisted tab.
+const delist = asyncHandler(async (req, res) => {
+  const item = await Experience.findByPk(req.params.id);
+  if (!item) return fail(res, 'Experience not found', 404);
+  if (!(item.status === 'published' && item.isActive)) return fail(res, 'Only a live listing can be delisted', 400);
+  const reason = String(req.body?.reason || '').trim();
+  if (!reason) return fail(res, 'A delist reason is required', 400);
+
+  item.status = 'archived';
+  item.isActive = false;
+  item.reviewStage = 'delisted';
+  item.data = { ...(item.data || {}), delistReason: reason, delistedAt: new Date().toISOString(), hostStatus: 'draft' };
+  await item.save();
+
+  reviewNotify.notifySubmitter(item, {
+    kind: 'rejected', title: `"${item.name}" was delisted`, message: reason, meta: { experienceName: item.name },
+  }).catch(() => {});
+  reviewNotify.emitQueueChanged({ experienceId: item.id });
+
+  const full = await Experience.findByPk(item.id, { include: INCLUDE });
+  return ok(res, { item: await withAudiences(full) }, 'Delisted from the platform');
+});
+
 module.exports = {
-  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit, upRespond,
+  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit, upRespond, delist,
 };

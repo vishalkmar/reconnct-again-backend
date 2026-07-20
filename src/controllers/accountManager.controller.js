@@ -71,4 +71,54 @@ const supplierExperiences = asyncHandler(async (req, res) => {
   return ok(res, { supplier: supplier.toSafeJSON(), items });
 });
 
-module.exports = { mySuppliers, supplierExperiences };
+// GET /api/team/my-suppliers/overview — AM dashboard aggregates + drill-down
+// lists (live / rejected / delisted) across all assigned suppliers, each row
+// carrying supplier + experience + onboarded/listed/delisted dates + reason.
+const overview = asyncHandler(async (req, res) => {
+  const suppliers = await Supplier.findAll({ where: { accountManagerId: req.teamMember.id } });
+  const supById = new Map(suppliers.map((s) => [s.id, s]));
+  const ids = suppliers.map((s) => s.id);
+  const exps = ids.length
+    ? await Experience.findAll({
+      where: { supplierId: ids },
+      include: [
+        { model: ExperienceCategory, as: 'category', attributes: ['id', 'name'] },
+        { model: ExperienceType, as: 'type', attributes: ['id', 'name'] },
+      ],
+      order: [['updatedAt', 'DESC']],
+    })
+    : [];
+
+  const card = (e) => {
+    const j = e.toJSON();
+    const sup = supById.get(j.supplierId);
+    return {
+      id: j.id,
+      name: j.name,
+      mainImage: j.mainImage,
+      location: j.location || j.city || '',
+      category: j.category?.name || null,
+      type: j.type?.name || null,
+      supplier: sup ? { id: sup.id, name: sup.companyName, email: sup.email, phone: sup.phone, onboardedAt: sup.createdAt } : null,
+      listedAt: (j.data && j.data.listedAt) || null,
+      delistedAt: (j.data && j.data.delistedAt) || null,
+      reason: j.reviewNote || (j.data && j.data.delistReason) || null,
+      reviewStage: j.reviewStage,
+    };
+  };
+
+  const isLive = (e) => e.status === 'published' && e.isActive;
+  const isRejected = (e) => ['rejected', 'qc_rejected'].includes(e.reviewStage) || (e.status === 'archived' && e.reviewStage !== 'delisted');
+  const isDelisted = (e) => e.reviewStage === 'delisted';
+
+  const live = exps.filter(isLive).map(card);
+  const rejected = exps.filter(isRejected).map(card);
+  const delisted = exps.filter(isDelisted).map(card);
+
+  return ok(res, {
+    stats: { totalSuppliers: suppliers.length, liveListings: live.length, rejected: rejected.length, delisted: delisted.length },
+    live, rejected, delisted,
+  });
+});
+
+module.exports = { mySuppliers, supplierExperiences, overview };

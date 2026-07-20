@@ -331,7 +331,7 @@ const directList = asyncHandler(async (req, res) => {
   item.reviewStage = 'published';
   item.reviewedByTeamMemberId = req.teamMember ? req.teamMember.id : null;
   item.reviewedAt = new Date();
-  item.data = { ...(item.data || {}), hostStatus: 'approved' };
+  item.data = { ...(item.data || {}), hostStatus: 'approved', listedAt: item.data?.listedAt || new Date().toISOString() };
   await item.save();
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
 
