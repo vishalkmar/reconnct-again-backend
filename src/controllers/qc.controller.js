@@ -7,7 +7,7 @@ const { ok, fail } = require('../utils/response');
 const { validateQcFeedback, QC_FEEDBACK_FIELDS } = require('../utils/qcFeedback');
 const { istToInstant } = require('../utils/istTime');
 const reviewNotify = require('../services/reviewNotify.service');
-const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+const { ensureAccountManagerAssigned, resolveUpResponder } = require('../services/accountManager.service');
 
 let mailer = null;
 try { mailer = require('../pwa/services/mailer'); } catch { mailer = null; }
@@ -138,9 +138,21 @@ const submitFeedback = asyncHandler(async (req, res) => {
       meta: { recommendation: rec, overallRating: feedback.overallRating },
     });
   } else {
-    // Minor/major changes → Under Progress (goes to both COPS and the submitter).
+    // Minor/major changes → Under Progress. A BD-submitted listing goes back to
+    // that BD; a supplier's own submission has no BD, so it lands with the
+    // supplier's Key Account Manager, who carries the same responsibilities.
+    // The owner is stamped on the round so the answer can't drift if the
+    // supplier is reassigned mid-round.
     const changeType = rec === 'approved_major' ? 'major' : 'minor';
-    item.qcReview = { ...base, changeType, changeDetails: feedback.changeDetails || '', upState: 'pending_bd' };
+    const responder = await resolveUpResponder(item).catch(() => null);
+    item.qcReview = {
+      ...base,
+      changeType,
+      changeDetails: feedback.changeDetails || '',
+      upState: 'pending_bd',
+      upResponderId: responder ? responder.teamMemberId : null,
+      upResponderVia: responder ? responder.via : null,
+    };
     item.reviewStage = 'under_progress';
     item.reviewNote = feedback.changeDetails || `QCOPS suggested ${changeType} changes.`;
     await item.save();
@@ -150,12 +162,19 @@ const submitFeedback = asyncHandler(async (req, res) => {
       message: feedback.changeDetails || '',
       meta: { recommendation: rec, changeType },
     });
-    await reviewNotify.notifySubmitter(item, {
-      kind: 'under_progress',
-      title: `Changes suggested on "${item.name}"`,
-      message: feedback.changeDetails || `QCOPS suggested ${changeType} changes — respond in Under Progress.`,
-      meta: { changeType, changeDetails: feedback.changeDetails, experienceName: item.name },
-    }).catch(() => {});
+    // Straight to whoever has to answer — the BD, or the Key Account Manager
+    // on a supplier's own submission.
+    if (responder) {
+      await reviewNotify.notify({
+        recipientType: 'team',
+        recipientId: responder.teamMemberId,
+        experienceId: item.id,
+        kind: 'under_progress',
+        title: `Changes suggested on "${item.name}"`,
+        message: feedback.changeDetails || `QCOPS suggested ${changeType} changes — respond in Under Progress.`,
+        meta: { changeType, changeDetails: feedback.changeDetails, experienceName: item.name, via: responder.via },
+      }).catch(() => {});
+    }
   }
   reviewNotify.emitQueueChanged({ experienceId: item.id });
   return ok(res, { item: item.toJSON() }, 'Feedback submitted');

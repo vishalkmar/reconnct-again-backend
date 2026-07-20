@@ -104,6 +104,17 @@ const overview = asyncHandler(async (req, res) => {
       delistedAt: (j.data && j.data.delistedAt) || null,
       reason: j.reviewNote || (j.data && j.data.delistReason) || null,
       reviewStage: j.reviewStage,
+      // Everything the Under Progress responder UI needs — the same shape the
+      // BD's board gets, so both render the identical block.
+      qc: j.qcReview ? {
+        changeType: j.qcReview.changeType || null,
+        changeDetails: j.qcReview.changeDetails || null,
+        upState: j.qcReview.upState || null,
+        bdReason: j.qcReview.bdReason || null,
+        bdDeadline: j.qcReview.bdDeadline || null,
+        copsAck: j.qcReview.copsAck || null,
+        supplierAck: j.qcReview.supplierAck || null,
+      } : null,
     };
   };
 
@@ -114,10 +125,22 @@ const overview = asyncHandler(async (req, res) => {
   const live = exps.filter(isLive).map(card);
   const rejected = exps.filter(isRejected).map(card);
   const delisted = exps.filter(isDelisted).map(card);
+  // QCOPS asked for changes on a supplier's own submission — this AM now owns
+  // the response (reject with reason / accept with a deadline), the job a BD
+  // does for their own submissions.
+  const underProgress = exps
+    .filter((e) => e.reviewStage === 'under_progress' && (e.qcReview || {}).upResponderId === req.teamMember.id)
+    .map(card);
 
   return ok(res, {
-    stats: { totalSuppliers: suppliers.length, liveListings: live.length, rejected: rejected.length, delisted: delisted.length },
-    live, rejected, delisted,
+    stats: {
+      totalSuppliers: suppliers.length,
+      liveListings: live.length,
+      rejected: rejected.length,
+      delisted: delisted.length,
+      underProgress: underProgress.length,
+    },
+    live, rejected, delisted, under_progress: underProgress,
   });
 });
 

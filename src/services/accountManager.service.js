@@ -87,4 +87,40 @@ const reassignOrphanedSuppliers = async () => {
   return { reassigned };
 };
 
-module.exports = { ensureAccountManagerAssigned, reassignOrphanedSuppliers };
+/*
+  Who answers a QCOPS "approved with minor/major changes" round?
+
+  A BD-submitted experience goes back to that BD. But when the SUPPLIER added
+  it themselves there is no BD in the loop — the person who owns that
+  relationship is the supplier's Key Account Manager, so the whole
+  reject-with-reason / accept-with-deadline responsibility lands on them
+  instead. Same lane, same actions, different owner.
+
+  Returns null when nobody can be resolved (e.g. a host listing, or a supplier
+  with no manager yet) — the round then simply waits for Center Ops.
+*/
+const resolveUpResponder = async (exp) => {
+  if (!exp) return null;
+  if (exp.createdByTeamMemberId) {
+    return { teamMemberId: exp.createdByTeamMemberId, via: 'bd' };
+  }
+  if (exp.supplierId) {
+    const supplier = await Supplier.findByPk(exp.supplierId, { attributes: ['id', 'accountManagerId'] });
+    if (supplier && supplier.accountManagerId) {
+      return { teamMemberId: supplier.accountManagerId, via: 'account_manager' };
+    }
+  }
+  return null;
+};
+
+// May this team member answer the Under Progress round on this experience?
+const canRespondToUp = (exp, teamMemberId) => {
+  if (!teamMemberId) return false;
+  if (exp.createdByTeamMemberId === teamMemberId) return true;
+  return (exp.qcReview && exp.qcReview.upResponderId) === teamMemberId;
+};
+
+module.exports = {
+  ensureAccountManagerAssigned, reassignOrphanedSuppliers,
+  resolveUpResponder, canRespondToUp,
+};

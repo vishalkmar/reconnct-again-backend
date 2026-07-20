@@ -5,7 +5,7 @@ const {
   Experience, ExperienceCategory, ExperienceType, ExperienceAudience, Supplier,
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
-const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+const { ensureAccountManagerAssigned, canRespondToUp } = require('../services/accountManager.service');
 const {
   summarize, resetForNewRound, buildRoundResolutions, sectionChanged, logResolutions,
 } = require('../utils/reviewSections');
@@ -302,7 +302,9 @@ const upRespond = asyncHandler(async (req, res) => {
   if (!req.teamMember) return fail(res, 'Only a team member can respond here', 400);
   const item = await Experience.findByPk(req.params.id);
   if (!item) return fail(res, 'Experience not found', 404);
-  if (item.createdByTeamMemberId !== req.teamMember.id) return fail(res, 'Not your submission', 403);
+  // The submitting BD — or, on a supplier's own submission, the Key Account
+  // Manager the round was handed to (see resolveUpResponder).
+  if (!canRespondToUp(item, req.teamMember.id)) return fail(res, 'This response is not yours to give', 403);
   if (item.reviewStage !== 'under_progress') return fail(res, 'This experience is not in Under Progress', 400);
 
   const decision = String(req.body?.decision || '');
