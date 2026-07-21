@@ -113,14 +113,35 @@ const resolveUpResponder = async (exp) => {
   return null;
 };
 
-// May this team member answer the Under Progress round on this experience?
+/*
+  Does the round's OWN record say this team member owns it? The submitting BD
+  always does; otherwise the responder stamped on the round at QCOPS-feedback
+  time. No DB access — safe to use while filtering a list of experiences.
+*/
 const canRespondToUp = (exp, teamMemberId) => {
   if (!teamMemberId) return false;
   if (exp.createdByTeamMemberId === teamMemberId) return true;
-  return (exp.qcReview && exp.qcReview.upResponderId) === teamMemberId;
+  return !!(exp.qcReview && exp.qcReview.upResponderId === teamMemberId);
+};
+
+/*
+  Same question, but able to fall back to the DB. A round carries no
+  upResponderId when it opened before the stamp existed (or the supplier had no
+  Key Account Manager at the time) — the sync check then says "nobody", leaving
+  it permanently unanswerable. Whoever manages that supplier NOW is the right
+  owner. An explicitly stamped owner still wins, so a second AM can never
+  answer someone else's round.
+*/
+const mayRespondToUp = async (exp, teamMemberId) => {
+  if (canRespondToUp(exp, teamMemberId)) return true;
+  if (exp.qcReview && exp.qcReview.upResponderId) return false;
+  if (exp.createdByTeamMemberId) return false; // a BD's round is only theirs
+  if (!exp.supplierId || !teamMemberId) return false;
+  const supplier = await Supplier.findByPk(exp.supplierId, { attributes: ['id', 'accountManagerId'] });
+  return !!(supplier && supplier.accountManagerId === teamMemberId);
 };
 
 module.exports = {
   ensureAccountManagerAssigned, reassignOrphanedSuppliers,
-  resolveUpResponder, canRespondToUp,
+  resolveUpResponder, canRespondToUp, mayRespondToUp,
 };
