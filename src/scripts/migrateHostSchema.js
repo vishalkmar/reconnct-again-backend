@@ -93,6 +93,24 @@ const migrate = async () => {
     }
   }
   await addColumnIfMissing('bookings', 'reminderEmailSentAt', 'DATETIME NULL', summary);
+  // Post-experience "how was it / please rate" email + push (idempotency mark).
+  const hadCompletionCol = !!(await describeColumn('bookings', 'completionEmailSentAt'));
+  await addColumnIfMissing('bookings', 'completionEmailSentAt', 'DATETIME NULL', summary);
+  // One-time backfill: the completion sweep looks BACKWARD, so on the very
+  // first run it would mail every past booking at once. Mark everything that
+  // already finished as "sent" (without sending) so the feature only ever
+  // applies to experiences that complete from here on.
+  if (!hadCompletionCol && (await tableExists('bookings'))) {
+    try {
+      const [res] = await sequelize.query(
+        'UPDATE `bookings` SET `completionEmailSentAt` = NOW() '
+        + 'WHERE `completionEmailSentAt` IS NULL AND `scheduledAt` IS NOT NULL AND `scheduledAt` <= NOW()',
+      );
+      summary.changes.push(`bookings.completionEmailSentAt backfilled for ${res.affectedRows ?? 0} past booking(s) (suppresses a first-run blast)`);
+    } catch (err) {
+      summary.changes.push(`bookings.completionEmailSentAt backfill failed: ${err.message}`);
+    }
+  }
 
   // Backfill scheduledAt for existing confirmed bookings that predate the
   // column, so the reminder sweep can pick them up too (harmless no-op for

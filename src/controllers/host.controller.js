@@ -11,6 +11,7 @@ const {
   resetForNewRound, summarize, buildRoundResolutions, logResolutions, sectionChanged,
 } = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
+const reviewEmail = require('../services/reviewEmail.service');
 const { validateImagesForSubmit } = require('../utils/experienceValidation');
 const { submitterTab } = require('../utils/experienceStatus');
 
@@ -386,6 +387,8 @@ const createMine = asyncHandler(async (req, res) => {
   if (row.supplierId) ensureAccountManagerAssigned(row.supplierId).catch(() => {});
   if (submit) {
     reviewNotify.notifyCopsTeam({ experienceId: row.id, kind: 'submitted', title: `New submission: "${row.name}"`, meta: { experienceName: row.name } }).catch(() => {});
+    reviewEmail.notifyCopsNewSubmission({ exp: row, via: req.supplier ? req.supplier.companyName : '' })
+      .catch((e) => console.error('[review-email] new submission:', e.message));
   }
   const full = await Experience.findByPk(row.id, { include: [CATEGORY, TYPE] });
   return created(res, { listing: toHostListing(full), form: toHostForm(full) }, submit ? 'Submitted for review' : 'Saved as draft');
@@ -438,6 +441,9 @@ const updateMine = asyncHandler(async (req, res) => {
       message: isReviewAgain ? 'The submitter addressed the objections — ready for another look.' : null,
       meta: { experienceName: row.name, round: data.reviewRound || 0 },
     }).catch(() => {});
+    reviewEmail.notifyCopsNewSubmission({
+      exp: row, resubmitted: !!isReviewAgain, via: req.supplier ? req.supplier.companyName : '',
+    }).catch((e) => console.error('[review-email] resubmission:', e.message));
   }
 
   const full = await Experience.findByPk(row.id, { include: [CATEGORY, TYPE] });

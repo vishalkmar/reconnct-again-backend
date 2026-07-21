@@ -297,10 +297,12 @@ const runBackgroundDbWork = async () => {
   // runs every 10 minutes for the lifetime of this process. Started only
   // after migrations so the scheduledAt/reminder*SentAt columns definitely
   // exist by the time it queries them.
-  const { sweepReminders } = require('./services/reminder.service');
+  const { sweepReminders, sweepCompletions } = require('./services/reminder.service');
   const { sweepQcVisitReminders } = require('./services/qcReminder.service');
   const runSweeps = () => {
     sweepReminders().catch((err) => console.error('[reminder] sweep failed:', err.message));
+    // Post-experience "how was it / please rate" email + push.
+    sweepCompletions().catch((err) => console.error('[completion] sweep failed:', err.message));
     sweepQcVisitReminders().catch((err) => console.error('[qc-reminder] sweep failed:', err.message));
   };
   runSweeps();

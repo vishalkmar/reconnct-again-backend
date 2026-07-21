@@ -7,6 +7,7 @@ const { ok, fail } = require('../utils/response');
 const { validateQcFeedback, QC_FEEDBACK_FIELDS } = require('../utils/qcFeedback');
 const { istToInstant } = require('../utils/istTime');
 const reviewNotify = require('../services/reviewNotify.service');
+const reviewEmail = require('../services/reviewEmail.service');
 const { ensureAccountManagerAssigned, resolveUpResponder } = require('../services/accountManager.service');
 
 let mailer = null;
@@ -176,6 +177,12 @@ const submitFeedback = asyncHandler(async (req, res) => {
       }).catch(() => {});
     }
   }
+  // Outcome goes by email to Center Ops (who decides next) AND to whoever
+  // submitted it — BD or supplier — with the status QCOPS recorded.
+  reviewEmail.notifyQcFeedback({
+    exp: item, feedback, qcopsName: req.teamMember ? req.teamMember.name : '',
+  }).catch((e) => console.error('[review-email] qc feedback:', e.message));
+
   reviewNotify.emitQueueChanged({ experienceId: item.id });
   return ok(res, { item: item.toJSON() }, 'Feedback submitted');
 });

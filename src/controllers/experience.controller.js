@@ -10,6 +10,7 @@ const {
   summarize, resetForNewRound, buildRoundResolutions, sectionChanged, logResolutions,
 } = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
+const reviewEmail = require('../services/reviewEmail.service');
 const { validateImagesForSubmit } = require('../utils/experienceValidation');
 
 // Columns the form is allowed to write. Everything else the client sends is
@@ -173,6 +174,8 @@ const create = asyncHandler(async (req, res) => {
       title: `New submission: "${item.name}"`,
       meta: { experienceName: item.name },
     }).catch(() => {});
+    reviewEmail.notifyCopsNewSubmission({ exp: item, via: req.teamMember ? req.teamMember.name : '' })
+      .catch((e) => console.error('[review-email] new submission:', e.message));
   }
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return created(res, { item: await withAudiences(full) }, 'Experience saved');
@@ -290,6 +293,11 @@ const resubmit = asyncHandler(async (req, res) => {
     message: item.reviewStage === 'resubmitted' ? 'The submitter addressed the objections — ready for another look.' : null,
     meta: { experienceName: item.name, round: item.reviewRound || 0 },
   }).catch(() => {});
+  reviewEmail.notifyCopsNewSubmission({
+    exp: item,
+    resubmitted: item.reviewStage === 'resubmitted',
+    via: req.teamMember ? req.teamMember.name : '',
+  }).catch((e) => console.error('[review-email] resubmission:', e.message));
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: await withAudiences(full) }, 'Resubmitted for review');

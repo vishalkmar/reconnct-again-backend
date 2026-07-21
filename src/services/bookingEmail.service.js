@@ -242,6 +242,30 @@ const sendGuestReminder = async ({ booking, hoursBefore }) => {
 };
 
 /**
+ * "Hope you enjoyed it" — sent once, after the experience has finished, by the
+ * completion sweep in reminder.service.js. Doubles as the review ask: the app
+ * already prompts in-app, but a guest who doesn't reopen the app never sees
+ * that, so this is the nudge that actually reaches them.
+ */
+const sendExperienceCompleted = async ({ booking }) => {
+  if (!booking?.guestEmail) return;
+  const item = booking.itemSnapshot || {};
+  const name = item.name || 'your experience';
+  const subject = `How was ${name}?`;
+  const html = buildReminderHtml({
+    heading: 'Thanks for coming along 🎉',
+    lead: `We hope <strong>${escape(name)}</strong> was everything you hoped for. If you have a minute, a quick rating helps other travellers — and the host — more than you'd think. Booking code <strong>${escape(booking.bookingCode)}</strong>.`,
+    itemName: name,
+    itemImage: item.image,
+    itemLocation: item.location,
+    scheduleLine: scheduleLineFor(booking),
+    extraRows: [['Guests', String(booking.guestCount || 1)]],
+  });
+  const text = `Thanks for coming along! We hope ${name} was great. Rate your experience in the reconnct app — booking ${booking.bookingCode}.`;
+  return send({ to: booking.guestEmail, subject, html, text });
+};
+
+/**
  * Same reminder for the HOST — "your listing has a guest coming up".
  */
 const sendHostReminder = async ({
@@ -267,4 +291,5 @@ const sendHostReminder = async ({
 
 module.exports = {
   sendBookingConfirmation, notifyHostOfBooking, buildVoucherHtml, sendGuestReminder, sendHostReminder,
+  sendExperienceCompleted,
 };

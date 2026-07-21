@@ -1,6 +1,6 @@
 const { Op } = require('sequelize');
 const { Booking, Experience, User } = require('../models');
-const { sendGuestReminder, sendHostReminder } = require('./bookingEmail.service');
+const { sendGuestReminder, sendHostReminder, sendExperienceCompleted } = require('./bookingEmail.service');
 const { sendPushToUser } = require('./push.service');
 
 /*
@@ -80,4 +80,74 @@ const sweepReminders = async () => {
   }
 };
 
-module.exports = { sweepReminders };
+/*
+  Post-experience wave — the "hope you enjoyed it, please rate us" email AND a
+  system push.
+
+  The app already prompts for a review in-app (bookings/me/pending-review),
+  but that only ever fires for someone who happens to reopen the app. This is
+  the outward nudge: it lands on the lock screen, and tapping it deep-links
+  straight to the rating (kind:'review' → routeForPush in the app).
+
+  "Completed" matches the rule the review prompt itself uses — a confirmed
+  booking whose scheduled instant has passed — plus a grace period so the mail
+  doesn't arrive while the guest is still there. Idempotent via
+  completionEmailSentAt.
+*/
+const COMPLETION_GRACE_HOURS = 3;
+/*
+  Unlike the reminder wave (which only ever looks FORWARD), this one looks
+  backward — so without a floor the very first run after deploy would mail
+  every historical booking in the database at once. Anything that finished
+  more than a few days ago is water under the bridge; asking for a review then
+  is worse than not asking.
+*/
+const COMPLETION_MAX_AGE_DAYS = 7;
+
+const runCompletionWave = async () => {
+  const now = Date.now();
+  const cutoff = new Date(now - COMPLETION_GRACE_HOURS * HOUR_MS);
+  const floor = new Date(now - COMPLETION_MAX_AGE_DAYS * 24 * HOUR_MS);
+  const due = await Booking.findAll({
+    where: {
+      itemType: 'experience',
+      status: { [Op.in]: ['confirmed', 'completed'] },
+      scheduledAt: { [Op.ne]: null, [Op.lte]: cutoff, [Op.gte]: floor },
+      completionEmailSentAt: null,
+    },
+    limit: 200,
+  });
+
+  for (const booking of due) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      await sendExperienceCompleted({ booking });
+    } catch (err) {
+      console.error('[completion] guest email failed:', err.message);
+    }
+
+    const name = booking.itemSnapshot?.name || 'your experience';
+    sendPushToUser(booking.userId, {
+      title: `How was ${name}? 🎉`,
+      body: 'Thanks for coming along! Tap to rate your experience — it takes a few seconds.',
+      data: { kind: 'review', bookingCode: booking.bookingCode, isHostBooking: 'false' },
+    }).catch(() => {});
+
+    booking.completionEmailSentAt = new Date();
+    // eslint-disable-next-line no-await-in-loop
+    await booking.save();
+  }
+
+  return due.length;
+};
+
+const sweepCompletions = async () => {
+  try {
+    const n = await runCompletionWave();
+    if (n) console.log(`[completion] sent ${n} post-experience review request(s)`);
+  } catch (err) {
+    console.error('[completion] sweep failed:', err.message);
+  }
+};
+
+module.exports = { sweepReminders, sweepCompletions };

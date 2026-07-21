@@ -2,8 +2,10 @@ const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const { Supplier, Experience } = require('../models');
 const { ok, created, fail } = require('../utils/response');
+const { generatePassword, sendSupplierWelcome } = require('../services/supplierWelcome.service');
 
-const WRITABLE = ['companyName', 'supplierName', 'phone', 'email', 'image', 'b2bContract', 'notes', 'isActive', 'sortOrder'];
+// `notes` deliberately dropped — the field was removed from the onboarding form.
+const WRITABLE = ['companyName', 'supplierName', 'phone', 'email', 'image', 'b2bContract', 'isActive', 'sortOrder'];
 
 const pickWritable = (body) => {
   const out = {};
@@ -36,12 +38,32 @@ const getOne = asyncHandler(async (req, res) => {
 // POST /api/suppliers
 const create = asyncHandler(async (req, res) => {
   const data = pickWritable(req.body);
-  if (!data.companyName || !String(data.companyName).trim()) return fail(res, 'Company name is required', 400);
+  const need = (v) => !!(v && String(v).trim());
+  if (!need(data.companyName)) return fail(res, 'Company name is required', 400);
+  if (!need(data.supplierName)) return fail(res, 'Supplier name is required', 400);
+  if (!need(data.phone)) return fail(res, 'Phone is required', 400);
+  if (!need(data.email)) return fail(res, 'Email is required — the supplier logs in with it', 400);
+
+  /*
+    The password is generated HERE, never supplied by whoever is filling the
+    form: the person onboarding a supplier has no business knowing their
+    login. It's hashed by the model hook, and the plaintext only ever leaves
+    this function inside the welcome email — never in the response.
+  */
+  const password = generatePassword();
+  data.password = password;
+
   // Tagged so Center Ops / Account Manager can tell a BD-onboarded supplier
   // apart from one the admin added directly. Untouched for admin requests.
   if (req.teamMember) data.createdByTeamMemberId = req.teamMember.id;
   const item = await Supplier.create(data);
-  return created(res, { item: item.toSafeJSON() }, 'Supplier created');
+
+  // Non-blocking: the account exists either way, and a failed mail shouldn't
+  // roll back onboarding — but it IS the only copy of the password, so log it.
+  sendSupplierWelcome({ supplier: item, password })
+    .catch((err) => console.error('[supplier] welcome email failed:', err.message));
+
+  return created(res, { item: item.toSafeJSON() }, 'Supplier created — login details emailed to them');
 });
 
 // PUT /api/suppliers/:id

@@ -10,6 +10,7 @@ const {
 } = require('../utils/reviewSections');
 const { copsTab, COPS_TABS } = require('../utils/experienceStatus');
 const reviewNotify = require('../services/reviewNotify.service');
+const reviewEmail = require('../services/reviewEmail.service');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
 
 const INCLUDE = [
@@ -313,6 +314,8 @@ const finalApprove = asyncHandler(async (req, res) => {
     message: 'It now awaits an on-site quality check before it goes live.',
     meta: { experienceName: item.name },
   }).catch(() => {});
+  reviewEmail.notifySubmitterDecision({ exp: item, kind: 'approved' })
+    .catch((e) => console.error('[review-email] approved:', e.message));
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Content approved — send it for an on-site QCOPS check to go live');
@@ -389,6 +392,12 @@ const followUp = asyncHandler(async (req, res) => {
     message: `${s.objection} section${s.objection > 1 ? 's have' : ' has'} an objection to address.`,
     meta: { experienceName: item.name, objections: s.objections, suggestion: item.reviewSuggestion || '', round: item.reviewRound || 0 },
   }).catch(() => {});
+  reviewEmail.notifySubmitterDecision({
+    exp: item,
+    kind: 'objection',
+    note: item.reviewNote,
+    extraRows: [['Round', String((item.reviewRound || 0) + 1)]],
+  }).catch((e) => console.error('[review-email] objection:', e.message));
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Sent back to the submitter for follow-up');
@@ -419,6 +428,8 @@ const reject = asyncHandler(async (req, res) => {
     message: note,
     meta: { experienceName: item.name },
   }).catch(() => {});
+  reviewEmail.notifySubmitterDecision({ exp: item, kind: 'rejected', note })
+    .catch((e) => console.error('[review-email] rejected:', e.message));
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Experience rejected');
@@ -508,9 +519,15 @@ const sendQcops = asyncHandler(async (req, res) => {
   await reviewNotify.notifySubmitter(item, {
     kind: 'section_approved',
     title: `"${item.name}" cleared content review`,
-    message: 'It’s now in the on-site quality-check stage.',
-    meta: { experienceName: item.name },
+    message: 'It’s now in the on-site quality-check stage — a team member may visit the location.',
+    meta: { experienceName: item.name, visitDate, visitTime },
   }).catch(() => {});
+  // The supplier is the one who has to have the place ready, and the assigned
+  // QCOPS is the one who has to go — both get told by email, not just in-app.
+  reviewEmail.notifySupplierQcVisit({ exp: item, qc: item.qcReview })
+    .catch((e) => console.error('[review-email] qc visit (supplier):', e.message));
+  reviewEmail.notifyQcopsAssignment({ exp: item, qcopsId: qcops.id, qc: item.qcReview })
+    .catch((e) => console.error('[review-email] qc assignment:', e.message));
   reviewNotify.emitQueueChanged({ experienceId: item.id });
 
   return ok(res, { qcops: { id: qcops.id, name: qcops.name, employeeCode: qcops.employeeCode } }, `Assigned to QCOPS — ${qcops.name}`);
