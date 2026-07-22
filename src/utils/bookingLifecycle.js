@@ -14,6 +14,7 @@
        stored a duration.
 */
 const DEFAULT_DURATION_MIN = 120; // 2h — a safe floor when duration is unknown
+const IST_OFFSET_MIN = 5 * 60 + 30; // times in specialRequests are IST wall clock
 
 // Minutes → from an experience's pricing.duration, or the value stored on the
 // booking snapshot at creation time. Returns 0 when nothing usable is found.
@@ -24,12 +25,34 @@ const durationMinutesOf = (pricingDuration) => {
   return h * 60 + m;
 };
 
+// The booking captures the chosen slot as free text, e.g.
+//   "Preferred time: 1:57 PM – 2:00 PM"
+// The END of that range is the truest completion moment — better than
+// start+duration, which is only a fallback (and wrong when the slot is shorter
+// than the listing's nominal duration, as in a 3-minute test slot). Combines
+// the end time with the booking's date (IST) into a real UTC instant.
+const slotEndInstant = (booking) => {
+  const text = String(booking.specialRequests || '');
+  const m = text.match(/(\d{1,2}):(\d{2})\s*(AM|PM)\s*[–—-]\s*(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!m) return null;
+  const ymd = String(booking.scheduledFor || booking.scheduledAt || '').slice(0, 10);
+  const [y, mo, d] = ymd.split('-').map(Number);
+  if (!y || !mo || !d) return null;
+  let hh = parseInt(m[4], 10) % 12;
+  if (/PM/i.test(m[6])) hh += 12;
+  const mm = parseInt(m[5], 10) || 0;
+  return Date.UTC(y, mo - 1, d, hh, mm) - IST_OFFSET_MIN * 60000;
+};
+
 const endInstant = (booking, durationMinutes) => {
   if (booking.scheduledEndAt) {
     // DATEONLY end — treat as the end of that day so same-day comparisons work.
     const d = new Date(booking.scheduledEndAt);
     if (!Number.isNaN(d.getTime())) return d.getTime() + 24 * 60 * 60 * 1000 - 1;
   }
+  // The exact booked slot end, if the range was captured.
+  const slotEnd = slotEndInstant(booking);
+  if (slotEnd) return slotEnd;
   if (!booking.scheduledAt) return null;
   const start = new Date(booking.scheduledAt).getTime();
   if (Number.isNaN(start)) return null;

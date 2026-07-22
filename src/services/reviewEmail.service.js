@@ -232,10 +232,35 @@ const notifyQcFeedback = async ({ exp, feedback, qcopsName }) => {
   }
 };
 
+/* ── A supplier is assigned to a Key Account Manager ──────────────────── */
+const notifyAmAssigned = async ({ manager, supplier }) => {
+  if (!manager?.email) return;
+  const html = emailShell({
+    preheader: `${supplier.companyName || 'A supplier'} is now assigned to you`,
+    eyebrow: 'New supplier assigned',
+    heading: escape(supplier.companyName || 'New supplier'),
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        Hi ${escape(manager.name || 'there')}, a supplier has just been assigned to you to guide and look after.
+      </p>
+      ${kvTable([
+    ['Company', escape(supplier.companyName || '—')],
+    supplier.supplierName ? ['Contact', escape(supplier.supplierName)] : null,
+    supplier.email ? ['Email', escape(supplier.email)] : null,
+    supplier.phone ? ['Phone', escape(supplier.phone)] : null,
+  ])}
+      ${ctaButton(`${TEAM_PORTAL_URL.replace('/login', '')}/my-suppliers`, 'Open Assigned Suppliers')}
+    `,
+  });
+  const text = `New supplier assigned to you: ${supplier.companyName || ''} (${supplier.email || ''}). Open your Assigned Suppliers in the Team Portal.`;
+  await mail({ to: manager.email, subject: `New supplier assigned: "${supplier.companyName || 'supplier'}"`, html, text });
+};
+
 module.exports = {
   submitterContact,
   supplierContact,
   notifyCopsNewSubmission,
+  notifyAmAssigned,
   notifySubmitterDecision,
   notifySupplierQcVisit,
   notifyQcopsAssignment,

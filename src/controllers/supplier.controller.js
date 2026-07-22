@@ -44,6 +44,13 @@ const create = asyncHandler(async (req, res) => {
   if (!need(data.phone)) return fail(res, 'Phone is required', 400);
   if (!need(data.email)) return fail(res, 'Email is required — the supplier logs in with it', 400);
 
+  // Email IS the supplier's login (supplierAuth lower-cases it on the way in),
+  // so it must be unique — store it normalised and reject a duplicate up front
+  // rather than minting a second account nobody can sign into.
+  data.email = String(data.email).toLowerCase().trim();
+  const clash = await Supplier.findOne({ where: { email: data.email } });
+  if (clash) return fail(res, 'A supplier with this email already exists', 409);
+
   /*
     The password is generated HERE, never supplied by whoever is filling the
     form: the person onboarding a supplier has no business knowing their
@@ -70,7 +77,15 @@ const create = asyncHandler(async (req, res) => {
 const update = asyncHandler(async (req, res) => {
   const item = await Supplier.findByPk(req.params.id);
   if (!item) return fail(res, 'Supplier not found', 404);
-  await item.update(pickWritable(req.body));
+  const data = pickWritable(req.body);
+  // Changing the login email → keep it normalised and still unique across
+  // every OTHER supplier.
+  if (data.email !== undefined) {
+    data.email = String(data.email).toLowerCase().trim();
+    const clash = await Supplier.findOne({ where: { email: data.email, id: { [Op.ne]: item.id } } });
+    if (clash) return fail(res, 'Another supplier already uses this email', 409);
+  }
+  await item.update(data);
   return ok(res, { item: item.toSafeJSON() }, 'Supplier updated');
 });
 

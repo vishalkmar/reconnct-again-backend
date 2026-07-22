@@ -50,6 +50,15 @@ const ensureAccountManagerAssigned = async (supplierId) => {
 
   supplier.accountManagerId = pick.id;
   await supplier.save();
+
+  // Tell the manager right away that this supplier is now theirs. Best-effort
+  // and lazily required to avoid a load-time cycle with reviewEmail.
+  try {
+    // eslint-disable-next-line global-require
+    const { notifyAmAssigned } = require('./reviewEmail.service');
+    notifyAmAssigned({ manager: pick, supplier })
+      .catch((err) => console.error('[am-assign] email failed:', err.message));
+  } catch { /* email module optional */ }
 };
 
 /*

@@ -95,33 +95,32 @@ const sweepReminders = async () => {
   doesn't arrive while the guest is still there. Idempotent via
   completionEmailSentAt.
 */
-const COMPLETION_GRACE_HOURS = 3;
 /*
-  Unlike the reminder wave (which only ever looks FORWARD), this one looks
-  backward — so without a floor the very first run after deploy would mail
-  every historical booking in the database at once. Anything that finished
-  more than a few days ago is water under the bridge; asking for a review then
-  is worse than not asking.
+  This wave looks BACKWARD, so without a floor the very first run after deploy
+  would mail every historical booking at once. Anything that finished more
+  than a few days ago is water under the bridge.
 */
 const COMPLETION_MAX_AGE_DAYS = 7;
 
 const runCompletionWave = async () => {
   const now = Date.now();
-  const cutoff = new Date(now - COMPLETION_GRACE_HOURS * HOUR_MS);
   const floor = new Date(now - COMPLETION_MAX_AGE_DAYS * 24 * HOUR_MS);
+  // Coarse filter (started, within the window, not yet mailed); the exact
+  // "has it ended?" test is isCompleted() below, keyed off the real booked
+  // slot end — so the review nudge fires promptly once the experience is over,
+  // not on a fixed delay after it started.
   const due = await Booking.findAll({
     where: {
       itemType: 'experience',
       status: { [Op.in]: ['confirmed', 'completed'] },
-      scheduledAt: { [Op.ne]: null, [Op.lte]: cutoff, [Op.gte]: floor },
+      scheduledAt: { [Op.ne]: null, [Op.lte]: new Date(now), [Op.gte]: floor },
       completionEmailSentAt: null,
     },
     limit: 200,
   });
 
   for (const booking of due) {
-    // The 3h grace is measured from START; a long experience (4h+) could still
-    // be running then. Only mail once it has actually ENDED.
+    // Only once the experience has actually ENDED.
     if (!isCompleted(booking)) continue; // eslint-disable-line no-continue
 
     try {
