@@ -5,6 +5,7 @@ const {
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { recomputeStats } = require('./review.controller');
+const { isCompleted } = require('../utils/bookingLifecycle');
 
 /*
   Real, user-submitted reviews for a completed Experience booking — distinct
@@ -14,14 +15,14 @@ const { recomputeStats } = require('./review.controller');
   dashboard (both hit the exact same endpoints, so behavior always matches).
 */
 
-// A confirmed booking counts as "completed" the moment its scheduled time has
-// passed, even if nothing ever flips the DB `status` column to 'completed' —
-// same rule host.controller.js already uses for the host-side bucket.
+// A booking is reviewable only once the experience has actually ENDED — not
+// the instant it started. End = scheduledAt + duration (see
+// utils/bookingLifecycle), which is what stops the rate-and-review popup from
+// firing while the guest is still mid-experience.
 const isCompletedNow = (booking) => {
   if (booking.status === 'completed') return true;
   if (booking.status !== 'confirmed') return false;
-  if (!booking.scheduledAt) return false;
-  return new Date(booking.scheduledAt).getTime() <= Date.now();
+  return isCompleted(booking);
 };
 
 // GET /api/bookings/me/pending-review  (authenticateUser)

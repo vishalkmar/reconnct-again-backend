@@ -225,6 +225,10 @@ const fetchItem = async (type, id) => {
       priceType: 'per_person',
       location: j.city || j.location || null,
       detailHref: `/experiences/${j.slug}`,
+      // durationMinutes drives the "ongoing vs completed" window — stored on
+      // the snapshot so it's available everywhere without re-fetching the
+      // experience (see utils/bookingLifecycle).
+      durationMinutes: (Number(pricing.duration?.hours) || 0) * 60 + (Number(pricing.duration?.minutes) || 0),
       meta: { city: j.city, location: j.location, durationLabel: j.durationLabel || null },
     };
   }
@@ -357,6 +361,9 @@ const buildItemSnapshot = (item) => ({
   location: item.location,
   detailHref: item.detailHref,
   hotel: item.hotel || null,
+  // Carried so the booking's lifecycle (ongoing vs completed) can be computed
+  // anywhere without re-loading the experience (see utils/bookingLifecycle).
+  durationMinutes: item.durationMinutes || 0,
   meta: item.meta || {},
   pricedAt: {
     price: item.price,

@@ -1,7 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const {
-  Booking, WalletTransaction, User, Experience,
+  Booking, WalletTransaction, User, Experience, Supplier,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 
@@ -227,4 +227,14 @@ const registerToken = asyncHandler(async (req, res) => {
   return ok(res, {}, 'Registered');
 });
 
-module.exports = { list, listForSupplier, registerToken };
+// POST /api/supplier/fcm-token — register the supplier's device for push.
+const registerSupplierToken = asyncHandler(async (req, res) => {
+  const { fcmToken } = req.body || {};
+  if (!fcmToken || typeof fcmToken !== 'string') return fail(res, 'fcmToken is required', 400);
+  await Supplier.update({ fcmToken }, { where: { id: req.supplier.id } });
+  return ok(res, {}, 'Registered');
+});
+
+module.exports = {
+  list, listForSupplier, registerToken, registerSupplierToken,
+};

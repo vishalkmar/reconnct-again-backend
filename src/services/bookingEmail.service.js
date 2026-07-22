@@ -1,7 +1,7 @@
 const { send } = require('../pwa/services/mailer');
 const { fromPaise } = require('./booking.service');
 const { buildBookingVoucherPdf } = require('./bookingVoucherPdf.service');
-const { sendPushToUser } = require('./push.service');
+const { sendPushToUser, sendPushToSupplier } = require('./push.service');
 const {
   escapeHtml: escape, emailShell, kvTable, calloutBox,
 } = require('../utils/emailLayout');
@@ -167,9 +167,34 @@ const buildHostVoucherHtml = (booking, exp) => {
  */
 const notifyHostOfBooking = async ({ booking }) => {
   if (!booking || booking.itemType !== 'experience') return;
-  const { Experience, User } = require('../models');
+  const { Experience, User, Supplier } = require('../models');
   const exp = await Experience.findByPk(booking.itemId);
-  if (!exp || !exp.ownerUserId) return;
+  if (!exp) return;
+
+  // A listing is owned by EITHER a "Switch to Host" User (ownerUserId) OR a
+  // Supplier (supplierId). Both should hear about a new booking — previously
+  // only the User case did, so supplier-owned listings got nothing.
+  if (exp.supplierId) {
+    sendPushToSupplier(exp.supplierId, {
+      title: 'New booking!',
+      body: `${booking.guestName || 'A guest'} just booked ${exp.name}.`,
+      data: { kind: 'host_booking', bookingId: booking.id, isHostBooking: 'true' },
+    }).catch(() => {});
+    const sup = await Supplier.findByPk(exp.supplierId);
+    if (sup?.email) {
+      const subject = `New booking on ${exp.name} — ${booking.bookingCode}`;
+      const html = buildHostVoucherHtml(booking, exp);
+      const text = `New booking on ${exp.name} (${booking.bookingCode}) — guest ${booking.guestName || 'Guest'} (${booking.guestEmail || ''}, ${booking.guestPhone || ''}), base amount ${fmtMoney(booking.subtotalPaise, booking.currency)}.`;
+      let att;
+      try {
+        const pdf = await buildBookingVoucherPdf(booking, { hostView: true });
+        att = [{ filename: `voucher-${booking.bookingCode}.pdf`, content: pdf }];
+      } catch { /* voucher optional */ }
+      await send({ to: sup.email, subject, html, text, attachments: att }).catch(() => {});
+    }
+  }
+
+  if (!exp.ownerUserId) return;
   const host = await User.findByPk(exp.ownerUserId);
   if (!host) return;
 

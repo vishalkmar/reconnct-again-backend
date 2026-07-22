@@ -1,6 +1,7 @@
 const { Op } = require('sequelize');
 const { Booking, Experience, User } = require('../models');
 const { sendGuestReminder, sendHostReminder, sendExperienceCompleted } = require('./bookingEmail.service');
+const { isCompleted } = require('../utils/bookingLifecycle');
 const { sendPushToUser } = require('./push.service');
 
 /*
@@ -119,6 +120,10 @@ const runCompletionWave = async () => {
   });
 
   for (const booking of due) {
+    // The 3h grace is measured from START; a long experience (4h+) could still
+    // be running then. Only mail once it has actually ENDED.
+    if (!isCompleted(booking)) continue; // eslint-disable-line no-continue
+
     try {
       // eslint-disable-next-line no-await-in-loop
       await sendExperienceCompleted({ booking });

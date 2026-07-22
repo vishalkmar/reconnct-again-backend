@@ -43,6 +43,8 @@ const migrate = async () => {
   const changes = [];
   await addColumnIfMissing('suppliers', 'password', 'VARCHAR(255) NULL', changes);
   await addColumnIfMissing('suppliers', 'lastLoginAt', 'DATETIME NULL', changes);
+  // Device push token — so booking/reminder pushes reach a supplier's app.
+  await addColumnIfMissing('suppliers', 'fcmToken', 'VARCHAR(255) NULL', changes);
   return { changes };
 };
 

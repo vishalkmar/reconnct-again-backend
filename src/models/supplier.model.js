@@ -24,6 +24,11 @@ const Supplier = sequelize.define(
     image: { type: DataTypes.STRING(500), allowNull: true },       // logo / photo (optional)
     b2bContract: { type: DataTypes.STRING(500), allowNull: true },  // uploaded contract URL (optional)
     notes: { type: DataTypes.TEXT, allowNull: true },
+    // FCM token for the supplier's device — set when they sign in on the app,
+    // so booking/reminder pushes reach them on the lock screen even with the
+    // app closed (users already have this; suppliers didn't, so a booking on a
+    // supplier-owned listing produced no outside notification at all).
+    fcmToken: { type: DataTypes.STRING(255), allowNull: true },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     sortOrder: { type: DataTypes.INTEGER, defaultValue: 0 },
     // Set when a BD (or other permitted staff) created this via the team

@@ -1,6 +1,6 @@
 const { getMessaging } = require('firebase-admin/messaging');
 const { getApp, isConfigured } = require('../config/firebaseAdmin');
-const { User } = require('../models');
+const { User, Supplier } = require('../models');
 
 // Every push carries BOTH a `notification` block (so Android auto-displays
 // it from the system tray even while the app is backgrounded or fully
@@ -47,4 +47,32 @@ const sendPushToUser = async (userId, { title, body, data } = {}) => {
   }
 };
 
-module.exports = { sendPushToUser };
+// Same as sendPushToUser, but for a Supplier's device (their own app login).
+// Suppliers are a separate model with their own fcmToken, so a booking on a
+// supplier-owned listing can reach them on the lock screen too.
+const sendPushToSupplier = async (supplierId, { title, body, data } = {}) => {
+  if (!isConfigured() || !supplierId) return;
+  try {
+    const supplier = await Supplier.findByPk(supplierId);
+    if (!supplier || !supplier.fcmToken) return;
+
+    const app = getApp();
+    if (!app) return;
+
+    await getMessaging(app).send({
+      token: supplier.fcmToken,
+      notification: { title, body },
+      data: stringifyData(data),
+      android: { priority: 'high', notification: { channelId: 'reconnct-default', color: '#FFB900' } },
+    });
+  } catch (err) {
+    const code = err && err.errorInfo && err.errorInfo.code;
+    if (code === 'messaging/registration-token-not-registered' || code === 'messaging/invalid-registration-token') {
+      try { await Supplier.update({ fcmToken: null }, { where: { id: supplierId } }); } catch { /* ignore */ }
+    } else {
+      console.warn('[push] supplier send failed:', err.message);
+    }
+  }
+};
+
+module.exports = { sendPushToUser, sendPushToSupplier };

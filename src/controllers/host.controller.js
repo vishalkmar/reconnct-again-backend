@@ -6,6 +6,7 @@ const {
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
+const { bookingLifecycle, durationMinutesOf } = require('../utils/bookingLifecycle');
 const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
 const {
   resetForNewRound, summarize, buildRoundResolutions, logResolutions, sectionChanged,
@@ -69,17 +70,11 @@ const toYMD = (d) => {
   return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`;
 };
 
-// Booking status → the host card's upcoming | completed | cancelled buckets.
-// Time-based, same rule as experienceReview.controller.js's isCompletedNow —
-// prefer the exact scheduledAt timestamp over the date-only scheduledFor so a
-// booking scheduled earlier today already reads as completed, not tomorrow.
-const hostBookingStatus = (b) => {
-  if (b.status === 'cancelled' || b.status === 'refunded') return 'cancelled';
-  const endIso = b.scheduledEndAt || b.scheduledAt || b.scheduledFor;
-  const past = endIso ? new Date(endIso).getTime() <= Date.now() : false;
-  if (b.status === 'completed' || (b.status === 'confirmed' && past)) return 'completed';
-  return 'upcoming';
-};
+// Booking status → the host card's upcoming | ongoing | completed | cancelled
+// buckets. End-based (see utils/bookingLifecycle): a booking is ONGOING while
+// the experience is actually running and only COMPLETED once it has ended, so
+// a 10–11am slot no longer reads as completed at 10:00.
+const hostBookingStatus = (b, durationMinutes) => bookingLifecycle(b, durationMinutes);
 
 // Real bookings for one of the host's experiences (listings). Only rows that
 // actually reached payment (or were cancelled) — pending_payment carts are
@@ -93,6 +88,10 @@ const bookingsForExperience = async (experienceId) => {
     },
     order: [['scheduledFor', 'DESC'], ['createdAt', 'DESC']],
   });
+  // One duration lookup for the whole listing — cheaper than reading it off
+  // every booking snapshot, and correct even for legacy rows that predate it.
+  const exp = await Experience.findByPk(experienceId, { attributes: ['pricing'] });
+  const durationMinutes = durationMinutesOf(exp?.pricing?.duration);
   return rows.map((r) => {
     const j = r.toJSON ? r.toJSON() : r;
     return {
@@ -105,7 +104,7 @@ const bookingsForExperience = async (experienceId) => {
       // convenience fee are never the host's money, so never show the
       // guest's full total here (must match the voucher email exactly).
       amount: fromPaise(j.subtotalPaise || 0),
-      status: hostBookingStatus(j),
+      status: hostBookingStatus(j, durationMinutes),
     };
   });
 };
@@ -125,7 +124,7 @@ const getBooking = asyncHandler(async (req, res) => {
     booking: {
       id: j.id,
       bookingCode: j.bookingCode,
-      status: hostBookingStatus(j),
+      status: hostBookingStatus(j, durationMinutesOf(pricing.duration)),
       guest: { name: j.guestName, email: j.guestEmail, phone: j.guestPhone, count: j.guestCount },
       scheduledFor: j.scheduledFor,
       scheduledEndAt: j.scheduledEndAt,

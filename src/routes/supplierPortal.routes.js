@@ -20,6 +20,8 @@ router.put('/listings/:id', ctrl.updateMine);
 router.post('/listings/:id/up-ack', ctrl.upAckMine);
 router.delete('/listings/:id', ctrl.removeMine);
 router.get('/notifications', notificationCtrl.listForSupplier);
+// Register this supplier's device for booking/reminder push.
+router.post('/fcm-token', notificationCtrl.registerSupplierToken);
 // Supplier-only (no Host equivalent).
 router.get('/account-manager', portalCtrl.accountManager);
 
