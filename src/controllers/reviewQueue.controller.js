@@ -100,6 +100,10 @@ const withSource = async (items) => {
         status: j.qcReview.status,
         visitDate: j.qcReview.visitDate,
         visitTime: j.qcReview.visitTime,
+        // QCOPS's acknowledgement (their chosen schedule + note back to COPS).
+        ackNote: j.qcReview.ackNote || null,
+        acknowledgedAt: j.qcReview.acknowledgedAt || null,
+        assignedAt: j.qcReview.assignedAt || null,
         recommendation: j.qcReview.feedback?.recommendation,
       } : null,
     };

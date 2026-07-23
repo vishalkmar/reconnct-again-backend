@@ -16,7 +16,7 @@ try { mailer = require('../pwa/services/mailer'); } catch { mailer = null; }
 const INCLUDE = [
   { model: ExperienceCategory, as: 'category', attributes: ['id', 'name', 'slug', 'icon'] },
   { model: ExperienceType, as: 'type', attributes: ['id', 'name', 'slug'] },
-  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'email'] },
+  { model: Supplier, as: 'supplier', attributes: ['id', 'companyName', 'supplierName', 'email', 'phone'] },
 ];
 
 // The QC lifecycle lives on experiences that have a qcopsTeamMemberId + a
