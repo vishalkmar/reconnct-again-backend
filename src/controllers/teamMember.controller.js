@@ -92,7 +92,7 @@ const create = asyncHandler(async (req, res) => {
   const finalPermissions = { ...defaultPermissionsFor(roleType), ...(permissions || {}) };
 
   // Per-KAM supplier cap — only meaningful for Account Managers, but stored
-  // harmlessly on everyone. Positive integer, defaulting to 30.
+  // harmlessly on everyone. Positive integer, defaulting to 20.
   const cap = Number.parseInt(maxSuppliers, 10);
   const finalMax = Number.isFinite(cap) && cap > 0 ? cap : DEFAULT_MAX_SUPPLIERS;
 

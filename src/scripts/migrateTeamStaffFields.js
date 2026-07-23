@@ -60,8 +60,8 @@ const migrate = async () => {
   const changes = [];
   await addColumnIfMissing('suppliers', 'createdByTeamMemberId', 'INT NULL', changes);
   await addColumnIfMissing('experiences', 'createdByTeamMemberId', 'INT NULL', changes);
-  // Per-KAM supplier cap (Account Manager role). Default 30.
-  await addColumnIfMissing('team_members', 'maxSuppliers', 'INT NOT NULL DEFAULT 30', changes);
+  // Per-KAM supplier cap (Account Manager role). Default 20.
+  await addColumnIfMissing('team_members', 'maxSuppliers', 'INT NOT NULL DEFAULT 20', changes);
   await ensureStatusEnumHasPendingReview(changes);
   return { changes };
 };

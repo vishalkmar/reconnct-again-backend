@@ -83,7 +83,7 @@ const TeamMember = sequelize.define(
     // round-robin never assigns beyond it, and supplier creation is blocked
     // once every KAM is at their cap (admin raises it or adds a KAM). Ignored
     // for non-KAM roles.
-    maxSuppliers: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 },
+    maxSuppliers: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
     createdByAdminId: { type: DataTypes.INTEGER, allowNull: true },

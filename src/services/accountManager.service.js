@@ -18,7 +18,7 @@ const { Supplier, TeamMember } = require('../models');
 */
 
 // The least-loaded ACTIVE account manager, or null when none exist.
-const DEFAULT_MAX_SUPPLIERS = 30;
+const DEFAULT_MAX_SUPPLIERS = 20;
 
 // Active KAMs with their current load + cap. One query the pickers/capacity
 // checks all share.
