@@ -4,7 +4,7 @@ const {
   ROLE_TYPES, ROLE_LABELS, PERMISSION_KEYS, defaultPermissionsFor,
 } = require('../models/teamMember.model');
 const { ok, created, fail } = require('../utils/response');
-const { reassignOrphanedSuppliers } = require('../services/accountManager.service');
+const { reassignOrphanedSuppliers, managerLoads, DEFAULT_MAX_SUPPLIERS } = require('../services/accountManager.service');
 const { generatePassword, sendTeamWelcome } = require('../services/teamWelcome.service');
 
 const PREFIX = {
@@ -45,6 +45,28 @@ const list = asyncHandler(async (req, res) => {
   return ok(res, { members: members.map((m) => m.toSafeJSON()) });
 });
 
+// GET /api/admin/team/kams — the KAM Accounts Management view: every active
+// Account Manager with how many suppliers they currently hold vs their cap,
+// plus a pool summary so the admin can see at a glance whether onboarding is
+// about to start failing (assigned close to totalCap).
+const kams = asyncHandler(async (req, res) => {
+  const rows = await managerLoads();
+  const items = rows
+    .map((r) => ({
+      ...r.manager.toSafeJSON(),
+      assignedCount: r.load,
+      maxSuppliers: r.cap,
+      remaining: Math.max(0, r.cap - r.load),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  const totalCap = items.reduce((n, i) => n + i.maxSuppliers, 0);
+  const assigned = items.reduce((n, i) => n + i.assignedCount, 0);
+  return ok(res, {
+    kams: items,
+    summary: { managers: items.length, totalCap, assigned, remaining: Math.max(0, totalCap - assigned) },
+  });
+});
+
 // GET /api/admin/team/:id
 const getOne = asyncHandler(async (req, res) => {
   const member = await TeamMember.findByPk(req.params.id);
@@ -56,7 +78,7 @@ const getOne = asyncHandler(async (req, res) => {
 // `permissions` (partial) overrides the role's defaults per-key — lets the
 // admin uncheck/check anything even at creation time.
 const create = asyncHandler(async (req, res) => {
-  const { name, email, roleType, permissions } = req.body || {};
+  const { name, email, roleType, permissions, maxSuppliers } = req.body || {};
   if (!name || !email || !roleType) {
     return fail(res, 'name, email and roleType are required', 400);
   }
@@ -69,6 +91,11 @@ const create = asyncHandler(async (req, res) => {
   const employeeCode = await nextEmployeeCode(roleType);
   const finalPermissions = { ...defaultPermissionsFor(roleType), ...(permissions || {}) };
 
+  // Per-KAM supplier cap — only meaningful for Account Managers, but stored
+  // harmlessly on everyone. Positive integer, defaulting to 30.
+  const cap = Number.parseInt(maxSuppliers, 10);
+  const finalMax = Number.isFinite(cap) && cap > 0 ? cap : DEFAULT_MAX_SUPPLIERS;
+
   // Password is generated server-side and emailed — the admin never sets or
   // sees it, exactly like the supplier onboarding flow.
   const password = generatePassword();
@@ -80,6 +107,7 @@ const create = asyncHandler(async (req, res) => {
     password,
     roleType,
     permissions: finalPermissions,
+    maxSuppliers: finalMax,
     createdByAdminId: req.admin.id,
   });
 
@@ -96,9 +124,14 @@ const update = asyncHandler(async (req, res) => {
   const member = await TeamMember.findByPk(req.params.id);
   if (!member) return fail(res, 'Team member not found', 404);
 
-  const { name, permissions, isActive, password } = req.body || {};
+  const { name, permissions, isActive, password, maxSuppliers } = req.body || {};
   if (name !== undefined) member.name = String(name).trim();
   if (permissions !== undefined) member.permissions = { ...member.permissions, ...permissions };
+  if (maxSuppliers !== undefined) {
+    const cap = Number.parseInt(maxSuppliers, 10);
+    if (!Number.isFinite(cap) || cap <= 0) return fail(res, 'Max suppliers must be a positive number', 400);
+    member.maxSuppliers = cap;
+  }
   const wasActive = member.isActive;
   if (isActive !== undefined) member.isActive = !!isActive;
   if (password) {
@@ -126,5 +159,5 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  meta, list, getOne, create, update, remove,
+  meta, list, kams, getOne, create, update, remove,
 };

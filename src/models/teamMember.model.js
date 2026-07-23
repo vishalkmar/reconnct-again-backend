@@ -79,6 +79,11 @@ const TeamMember = sequelize.define(
     // Flat capability flags — see PERMISSION_KEYS. Stored as JSON so adding a
     // new capability later doesn't need a migration.
     permissions: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
+    // Account Manager only — the most suppliers this KAM may hold. The
+    // round-robin never assigns beyond it, and supplier creation is blocked
+    // once every KAM is at their cap (admin raises it or adds a KAM). Ignored
+    // for non-KAM roles.
+    maxSuppliers: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 30 },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
     createdByAdminId: { type: DataTypes.INTEGER, allowNull: true },

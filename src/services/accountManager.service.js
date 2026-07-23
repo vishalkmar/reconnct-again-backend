@@ -18,17 +18,49 @@ const { Supplier, TeamMember } = require('../models');
 */
 
 // The least-loaded ACTIVE account manager, or null when none exist.
-const pickLeastLoaded = async () => {
+const DEFAULT_MAX_SUPPLIERS = 30;
+
+// Active KAMs with their current load + cap. One query the pickers/capacity
+// checks all share.
+const managerLoads = async () => {
   const managers = await TeamMember.findAll({ where: { roleType: 'account_manager', isActive: true } });
-  if (!managers.length) return null;
-  const loads = await Promise.all(
-    managers.map((m) => Supplier.count({ where: { accountManagerId: m.id } })),
-  );
-  let bestIdx = 0;
-  for (let i = 1; i < managers.length; i += 1) {
-    if (loads[i] < loads[bestIdx]) bestIdx = i;
-  }
-  return managers[bestIdx];
+  return Promise.all(managers.map(async (m) => ({
+    manager: m,
+    load: await Supplier.count({ where: { accountManagerId: m.id } }),
+    cap: Number(m.maxSuppliers) || DEFAULT_MAX_SUPPLIERS,
+  })));
+};
+
+// The least-loaded active KAM that still has room under its cap, or null when
+// every KAM is full (or there are none) — the round-robin never overfills.
+const pickLeastLoaded = async () => {
+  const rows = (await managerLoads()).filter((r) => r.load < r.cap);
+  if (!rows.length) return null;
+  let best = rows[0];
+  for (let i = 1; i < rows.length; i += 1) if (rows[i].load < best.load) best = rows[i];
+  return best.manager;
+};
+
+/*
+  Is there room in the KAM pool for one more supplier? Used to gate supplier
+  creation so a BD can't create a supplier that could never be assigned a KAM.
+  Returns { ok, totalCap, assigned, managers }.
+*/
+const kamCapacity = async () => {
+  const rows = await managerLoads();
+  const totalCap = rows.reduce((n, r) => n + r.cap, 0);
+  const assigned = rows.reduce((n, r) => n + r.load, 0);
+  // Also count suppliers not yet assigned to anyone — they'll each need a slot
+  // when they go live, so they count against capacity too.
+  const unassigned = await Supplier.count({ where: { accountManagerId: { [Op.is]: null } } });
+  const needed = assigned + unassigned;
+  return {
+    ok: rows.length > 0 && needed < totalCap,
+    totalCap,
+    assigned,
+    unassigned,
+    managers: rows.length,
+  };
 };
 
 // Is this supplier's current manager still a real, usable contact?
@@ -176,4 +208,5 @@ const mayRespondToUp = async (exp, teamMemberId) => {
 module.exports = {
   ensureAccountManagerAssigned, reassignOrphanedSuppliers,
   resolveUpResponder, canRespondToUp, mayRespondToUp,
+  kamCapacity, managerLoads, DEFAULT_MAX_SUPPLIERS,
 };

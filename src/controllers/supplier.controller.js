@@ -52,6 +52,23 @@ const create = asyncHandler(async (req, res) => {
   if (clash) return fail(res, 'A supplier with this email already exists', 409);
 
   /*
+    Round-robin gate — a supplier is useless without a Key Account Manager, and
+    a KAM is assigned the moment their first listing goes live. If every KAM is
+    already at their cap (and un-assigned suppliers already fill the remaining
+    slots), this new supplier could never get one. Refuse the creation up front
+    with a clear, actionable message instead of quietly orphaning them. Admin
+    raises a KAM's limit (or adds a KAM) in "KAM Accounts Management".
+  */
+  const { kamCapacity } = require('../services/accountManager.service'); // eslint-disable-line global-require
+  const cap = await kamCapacity();
+  if (!cap.ok) {
+    const msg = cap.managers === 0
+      ? 'No Account Manager (KAM) exists yet — a supplier can\'t be onboarded until one is set up. Please ask an admin to add a KAM.'
+      : 'All Account Managers (KAMs) are at their supplier limit, so this supplier can\'t be assigned one. Please ask an admin to raise a KAM\'s limit or add a new KAM.';
+    return fail(res, msg, 409, { code: 'KAM_CAPACITY_FULL' });
+  }
+
+  /*
     The password is generated HERE, never supplied by whoever is filling the
     form: the person onboarding a supplier has no business knowing their
     login. It's hashed by the model hook, and the plaintext only ever leaves
