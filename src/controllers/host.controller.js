@@ -611,7 +611,65 @@ const listTransactions = asyncHandler(async (req, res) => {
   return ok(res, { transactions });
 });
 
+// GET /api/supplier/all-bookings (and /host/all-bookings) — every booking
+// across ALL the owner's listings, richly shaped for the "All Bookings" table
+// and its filters (search / date / category / rating). Cancelled + refunded
+// are included so the owner sees the full history.
+const allBookings = asyncHandler(async (req, res) => {
+  const exps = await Experience.findAll({
+    where: ownerWhere(req),
+    attributes: ['id', 'name', 'rating', 'pricing'],
+    include: [CATEGORY],
+  });
+  const expById = new Map(exps.map((e) => [e.id, e]));
+  const expIds = exps.map((e) => e.id);
+
+  const rows = expIds.length
+    ? await Booking.findAll({
+      where: {
+        itemType: 'experience',
+        itemId: { [Op.in]: expIds },
+        status: { [Op.in]: ['confirmed', 'completed', 'cancelled', 'refunded'] },
+      },
+      order: [['createdAt', 'DESC']],
+    })
+    : [];
+
+  // Pull the "Preferred time: 1:57 PM – 2:00 PM" range out of specialRequests
+  // for the "which slot" column.
+  const slotOf = (b) => {
+    const m = String(b.specialRequests || '').match(/(\d{1,2}:\d{2}\s*(?:AM|PM)\s*[–—-]\s*\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+    return m ? m[1].replace(/\s*[–—-]\s*/, ' – ') : null;
+  };
+
+  const bookings = rows.map((b) => {
+    const j = b.toJSON();
+    const exp = expById.get(j.itemId);
+    const expJ = exp ? (exp.toJSON ? exp.toJSON() : exp) : null;
+    return {
+      id: j.id,
+      bookingCode: j.bookingCode,
+      guestName: j.guestName || 'Guest',
+      guestEmail: j.guestEmail || '',
+      guestPhone: j.guestPhone || '',
+      guests: j.guestCount || 1,
+      bookedAt: j.createdAt,
+      scheduledFor: j.scheduledFor || toYMD(j.createdAt),
+      slot: slotOf(j),
+      experienceId: j.itemId,
+      experienceName: expJ?.name || 'Experience',
+      category: expJ?.category?.name || null,
+      rating: Number(expJ?.rating) || 0,
+      amount: fromPaise(j.subtotalPaise || 0),
+      status: hostBookingStatus(j, durationMinutesOf(expJ?.pricing?.duration)),
+    };
+  });
+
+  return ok(res, { bookings });
+});
+
 module.exports = {
   listMine, getMine, createMine, updateMine, removeMine, summary, getBooking, listTransactions,
+  allBookings,
   upAckMine,
 };
