@@ -5,6 +5,11 @@ const {
 } = require('../models/teamMember.model');
 const { ok, created, fail } = require('../utils/response');
 const { reassignOrphanedSuppliers, managerLoads, DEFAULT_MAX_SUPPLIERS } = require('../services/accountManager.service');
+
+// A KAM's supplier cap can never be set below this — 20 is the guaranteed
+// baseline. Lowering it once slots are full would orphan already-assigned
+// suppliers, breaking the whole round-robin flow.
+const MIN_MAX_SUPPLIERS = 20;
 const { generatePassword, sendTeamWelcome } = require('../services/teamWelcome.service');
 
 const PREFIX = {
@@ -92,9 +97,10 @@ const create = asyncHandler(async (req, res) => {
   const finalPermissions = { ...defaultPermissionsFor(roleType), ...(permissions || {}) };
 
   // Per-KAM supplier cap — only meaningful for Account Managers, but stored
-  // harmlessly on everyone. Positive integer, defaulting to 20.
+  // harmlessly on everyone. 20 is both the default AND a hard floor: dropping
+  // below it after slots fill up would strand already-assigned suppliers.
   const cap = Number.parseInt(maxSuppliers, 10);
-  const finalMax = Number.isFinite(cap) && cap > 0 ? cap : DEFAULT_MAX_SUPPLIERS;
+  const finalMax = Number.isFinite(cap) && cap >= MIN_MAX_SUPPLIERS ? cap : DEFAULT_MAX_SUPPLIERS;
 
   // Password is generated server-side and emailed — the admin never sets or
   // sees it, exactly like the supplier onboarding flow.
@@ -129,7 +135,9 @@ const update = asyncHandler(async (req, res) => {
   if (permissions !== undefined) member.permissions = { ...member.permissions, ...permissions };
   if (maxSuppliers !== undefined) {
     const cap = Number.parseInt(maxSuppliers, 10);
-    if (!Number.isFinite(cap) || cap <= 0) return fail(res, 'Max suppliers must be a positive number', 400);
+    if (!Number.isFinite(cap) || cap < MIN_MAX_SUPPLIERS) {
+      return fail(res, `Max suppliers can’t be below ${MIN_MAX_SUPPLIERS}`, 400);
+    }
     member.maxSuppliers = cap;
   }
   const wasActive = member.isActive;

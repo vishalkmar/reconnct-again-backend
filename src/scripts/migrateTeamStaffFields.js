@@ -56,12 +56,33 @@ const ensureStatusEnumHasPendingReview = async (changes) => {
   }
 };
 
+/*
+  The maxSuppliers column first shipped with DEFAULT 30. The baseline was later
+  fixed to 20 (and 20 is now a hard floor). This runs ONCE: when the column's
+  default is still the old 30, drop any leftover-default rows to 20 and set the
+  column default to 20. Guarded by the column default itself, so a later run —
+  and any admin who deliberately sets 30 afterwards — is never touched.
+*/
+const ensureMaxSuppliersBaseline20 = async (changes) => {
+  const col = await describeColumn('team_members', 'maxSuppliers');
+  if (!col) return; // addColumnIfMissing will create it with DEFAULT 20 below.
+  if (String(col.Default) !== '30') return; // already normalised.
+  try {
+    await sequelize.query('UPDATE `team_members` SET `maxSuppliers` = 20 WHERE `maxSuppliers` = 30');
+    await sequelize.query('ALTER TABLE `team_members` MODIFY COLUMN `maxSuppliers` INT NOT NULL DEFAULT 20');
+    changes.push('team_members.maxSuppliers baseline moved 30 → 20');
+  } catch (err) {
+    changes.push(`team_members.maxSuppliers baseline fix failed: ${err.message}`);
+  }
+};
+
 const migrate = async () => {
   const changes = [];
   await addColumnIfMissing('suppliers', 'createdByTeamMemberId', 'INT NULL', changes);
   await addColumnIfMissing('experiences', 'createdByTeamMemberId', 'INT NULL', changes);
-  // Per-KAM supplier cap (Account Manager role). Default 20.
+  // Per-KAM supplier cap (Account Manager role). Default & floor 20.
   await addColumnIfMissing('team_members', 'maxSuppliers', 'INT NOT NULL DEFAULT 20', changes);
+  await ensureMaxSuppliersBaseline20(changes);
   await ensureStatusEnumHasPendingReview(changes);
   return { changes };
 };
