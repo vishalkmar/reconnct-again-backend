@@ -316,6 +316,7 @@ const finalApprove = asyncHandler(async (req, res) => {
   }).catch(() => {});
   reviewEmail.notifySubmitterDecision({ exp: item, kind: 'approved' })
     .catch((e) => console.error('[review-email] approved:', e.message));
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'approved').catch(() => {});
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Content approved — send it for an on-site QCOPS check to go live');
@@ -398,6 +399,9 @@ const followUp = asyncHandler(async (req, res) => {
     note: item.reviewNote,
     extraRows: [['Round', String((item.reviewRound || 0) + 1)]],
   }).catch((e) => console.error('[review-email] objection:', e.message));
+  // Copy the supplier's KAM + onboarding BD on a direct-onboarded listing.
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'objection', item.reviewNote)
+    .catch(() => {});
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Sent back to the submitter for follow-up');
@@ -430,6 +434,7 @@ const reject = asyncHandler(async (req, res) => {
   }).catch(() => {});
   reviewEmail.notifySubmitterDecision({ exp: item, kind: 'rejected', note })
     .catch((e) => console.error('[review-email] rejected:', e.message));
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'rejected', note).catch(() => {});
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Experience rejected');

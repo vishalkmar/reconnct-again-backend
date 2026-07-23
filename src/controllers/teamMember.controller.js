@@ -5,6 +5,7 @@ const {
 } = require('../models/teamMember.model');
 const { ok, created, fail } = require('../utils/response');
 const { reassignOrphanedSuppliers } = require('../services/accountManager.service');
+const { generatePassword, sendTeamWelcome } = require('../services/teamWelcome.service');
 
 const PREFIX = {
   bd: 'BD',
@@ -55,12 +56,11 @@ const getOne = asyncHandler(async (req, res) => {
 // `permissions` (partial) overrides the role's defaults per-key — lets the
 // admin uncheck/check anything even at creation time.
 const create = asyncHandler(async (req, res) => {
-  const { name, email, password, roleType, permissions } = req.body || {};
-  if (!name || !email || !password || !roleType) {
-    return fail(res, 'name, email, password and roleType are required', 400);
+  const { name, email, roleType, permissions } = req.body || {};
+  if (!name || !email || !roleType) {
+    return fail(res, 'name, email and roleType are required', 400);
   }
   if (!ROLE_TYPES.includes(roleType)) return fail(res, 'Invalid roleType', 400);
-  if (String(password).length < 6) return fail(res, 'Password must be at least 6 characters', 400);
 
   const emailNorm = String(email).toLowerCase().trim();
   const existing = await TeamMember.findOne({ where: { email: emailNorm } });
@@ -69,17 +69,25 @@ const create = asyncHandler(async (req, res) => {
   const employeeCode = await nextEmployeeCode(roleType);
   const finalPermissions = { ...defaultPermissionsFor(roleType), ...(permissions || {}) };
 
+  // Password is generated server-side and emailed — the admin never sets or
+  // sees it, exactly like the supplier onboarding flow.
+  const password = generatePassword();
+
   const member = await TeamMember.create({
     name: String(name).trim(),
     email: emailNorm,
     employeeCode,
-    password: String(password),
+    password,
     roleType,
     permissions: finalPermissions,
     createdByAdminId: req.admin.id,
   });
 
-  return created(res, { member: member.toSafeJSON() }, 'Team member created');
+  // Non-blocking, and the only copy of the password — log a failure loudly.
+  sendTeamWelcome({ member, password })
+    .catch((err) => console.error('[team] welcome email failed:', err.message));
+
+  return created(res, { member: member.toSafeJSON() }, 'Team member created — login details emailed to them');
 });
 
 // PUT /api/admin/team/:id  { name?, permissions?, isActive?, password? }

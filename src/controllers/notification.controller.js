@@ -1,7 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const {
-  Booking, WalletTransaction, User, Experience, Supplier,
+  Booking, WalletTransaction, User, Experience, Supplier, ReviewNotification,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 
@@ -203,6 +203,28 @@ const listForSupplier = asyncHandler(async (req, res) => {
       }
     }
   }
+
+  // Review-pipeline pings addressed to this supplier (KAM assigned, objection
+  // raised, listing approved/rejected, deadline reminder, …). These are real
+  // persisted rows — the DERIVED booking feed above never carried them, which
+  // is why suppliers saw emails but nothing in their bell.
+  const pings = await ReviewNotification.findAll({
+    where: { recipientType: 'supplier', recipientId: supplierId },
+    order: [['createdAt', 'DESC']],
+    limit: 50,
+  });
+  pings.forEach((p) => {
+    const j = p.toJSON();
+    feed.push({
+      id: `n${j.id}`,
+      kind: j.kind || 'review',
+      title: j.title,
+      body: j.message || '',
+      at: j.createdAt,
+      readAt: j.readAt || null,
+      experienceId: j.experienceId || null,
+    });
+  });
 
   feed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
   feed.push({

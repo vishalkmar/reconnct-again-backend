@@ -85,10 +85,24 @@ const recipientForExperience = (exp) => {
 };
 
 // Notify the submitter of a review event (follow-up / reject / approve).
+// When the submitter is a SUPPLIER, also push to their phone so the objection/
+// approval reaches them on the lock screen, not just the in-app bell.
 const notifySubmitter = async (exp, payload) => {
   const to = recipientForExperience(exp);
   if (!to) return null;
-  return notify({ ...to, experienceId: exp.id, ...payload });
+  const row = await notify({ ...to, experienceId: exp.id, ...payload });
+  if (to.recipientType === 'supplier') {
+    try {
+      // eslint-disable-next-line global-require
+      const { sendPushToSupplier } = require('./push.service');
+      sendPushToSupplier(to.recipientId, {
+        title: payload.title || 'Update on your listing',
+        body: payload.message || '',
+        data: { kind: payload.kind || 'review', experienceId: exp.id },
+      }).catch(() => {});
+    } catch { /* push optional */ }
+  }
+  return row;
 };
 
 // Notify every active COPS member (bell) + live-refresh the queue — used when
@@ -101,7 +115,28 @@ const notifyCopsTeam = async ({ experienceId = null, kind, title, message = null
   emitQueueChanged({ experienceId });
 };
 
+/*
+  Supplier notification that also pushes to their PHONE. A supplier has both a
+  web bell (listForSupplier reads the persisted row) and the app (FCM), so an
+  important event should reach both — the row for the bell, a push for the
+  lock screen.
+*/
+const notifySupplier = async (supplierId, {
+  experienceId = null, kind, title, message = null, meta = null,
+} = {}) => {
+  if (!supplierId) return null;
+  const row = await notify({
+    recipientType: 'supplier', recipientId: supplierId, experienceId, kind, title, message, meta,
+  });
+  try {
+    // eslint-disable-next-line global-require
+    const { sendPushToSupplier } = require('./push.service');
+    sendPushToSupplier(supplierId, { title, body: message || '', data: { kind: kind || 'review', experienceId: experienceId || '' } }).catch(() => {});
+  } catch { /* push optional */ }
+  return row;
+};
+
 module.exports = {
-  initReviewSocket, notify, emitQueueChanged, notifySubmitter, notifyCopsTeam,
+  initReviewSocket, notify, emitQueueChanged, notifySubmitter, notifyCopsTeam, notifySupplier,
   recipientForExperience, COPS_ROOM, roomFor,
 };

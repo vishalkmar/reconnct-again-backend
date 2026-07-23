@@ -209,6 +209,11 @@ const publishLive = async (item, copsId) => {
   if (item.qcopsTeamMemberId) {
     reviewNotify.notify({ recipientType: 'team', recipientId: item.qcopsTeamMemberId, experienceId: item.id, kind: 'approved', title: `"${item.name}" is now live`, message: 'The listing you checked went live.' }).catch(() => {});
   }
+  // Emails: the submitter (you're live), the QCOPS who signed it off, and the
+  // supplier's KAM + BD on a direct-onboarded listing.
+  reviewEmail.notifySubmitterDecision({ exp: item, kind: 'live' }).catch(() => {});
+  reviewEmail.notifyQcopsWentLive({ exp: item }).catch(() => {});
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'live').catch(() => {});
   reviewNotify.emitQueueChanged({ experienceId: item.id });
 };
 
@@ -276,21 +281,12 @@ const upReject = asyncHandler(async (req, res) => {
   if (item.ownerUserId || item.supplierId) item.data = { ...(item.data || {}), hostStatus: 'draft' };
   await item.save();
 
-  const contact = await submitterContact(item);
-  if (contact) {
-    await reviewNotify.notify({
-      recipientType: contact.recipientType, recipientId: contact.recipientId, experienceId: item.id,
-      kind: 'rejected', title: `"${item.name}" was rejected`, message: reason, meta: { experienceName: item.name },
-    }).catch(() => {});
-    if (mailer && contact.email) {
-      mailer.send({
-        to: contact.email,
-        subject: `Your experience "${item.name}" was not approved`,
-        html: `<p>Hi ${contact.name || ''},</p><p>Your experience <strong>${item.name}</strong> was not approved:</p><blockquote>${reason}</blockquote>`,
-        text: `"${item.name}" was rejected. Reason: ${reason}`,
-      }).catch(() => {});
-    }
-  }
+  // Submitter: in-app + FCM push (notifySubmitter) and the styled email.
+  await reviewNotify.notifySubmitter(item, {
+    kind: 'rejected', title: `"${item.name}" was not approved`, message: reason, meta: { experienceName: item.name },
+  }).catch(() => {});
+  reviewEmail.notifySubmitterDecision({ exp: item, kind: 'rejected', note: reason }).catch(() => {});
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'rejected', reason).catch(() => {});
   // Ping the QCOPS who checked it → their board moves it to Rejected.
   if (item.qcopsTeamMemberId) {
     reviewNotify.notify({ recipientType: 'team', recipientId: item.qcopsTeamMemberId, experienceId: item.id, kind: 'rejected', title: `"${item.name}" was rejected`, message: reason }).catch(() => {});

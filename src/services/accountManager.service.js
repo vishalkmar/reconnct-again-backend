@@ -51,14 +51,37 @@ const ensureAccountManagerAssigned = async (supplierId) => {
   supplier.accountManagerId = pick.id;
   await supplier.save();
 
-  // Tell the manager right away that this supplier is now theirs. Best-effort
-  // and lazily required to avoid a load-time cycle with reviewEmail.
+  // Best-effort, lazily required to avoid a load-time cycle with these modules.
   try {
     // eslint-disable-next-line global-require
     const { notifyAmAssigned } = require('./reviewEmail.service');
+    // eslint-disable-next-line global-require
+    const reviewNotify = require('./reviewNotify.service');
+
+    // 1. The manager: email + in-app bell notification.
     notifyAmAssigned({ manager: pick, supplier })
-      .catch((err) => console.error('[am-assign] email failed:', err.message));
-  } catch { /* email module optional */ }
+      .catch((err) => console.error('[am-assign] manager email failed:', err.message));
+    reviewNotify.notify({
+      recipientType: 'team', recipientId: pick.id,
+      kind: 'am_assigned',
+      title: `New supplier assigned: "${supplier.companyName || 'supplier'}"`,
+      message: `${supplier.companyName || 'A supplier'} is now assigned to you to guide and look after.`,
+      meta: { supplierId: supplier.id, supplierName: supplier.companyName },
+    }).catch(() => {});
+
+    // 2. The supplier: an email so they always know who their account manager
+    //    is and how to reach them for help.
+    const { notifySupplierOfManager } = require('./reviewEmail.service');
+    notifySupplierOfManager({ supplier, manager: pick })
+      .catch((err) => console.error('[am-assign] supplier email failed:', err.message));
+    reviewNotify.notify({
+      recipientType: 'supplier', recipientId: supplier.id,
+      kind: 'am_assigned',
+      title: 'You have a Key Account Manager',
+      message: `${pick.name} is here to help with your listings, bookings and payouts.`,
+      meta: { managerName: pick.name, managerEmail: pick.email },
+    }).catch(() => {});
+  } catch (err) { console.error('[am-assign] notify wiring failed:', err.message); }
 };
 
 /*

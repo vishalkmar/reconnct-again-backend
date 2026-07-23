@@ -388,6 +388,10 @@ const createMine = asyncHandler(async (req, res) => {
     reviewNotify.notifyCopsTeam({ experienceId: row.id, kind: 'submitted', title: `New submission: "${row.name}"`, meta: { experienceName: row.name } }).catch(() => {});
     reviewEmail.notifyCopsNewSubmission({ exp: row, via: req.supplier ? req.supplier.companyName : '' })
       .catch((e) => console.error('[review-email] new submission:', e.message));
+    // A supplier adding their OWN experience → also tell their KAM + onboarding
+    // BD (email + in-app), so the people who look after them see it early.
+    reviewEmail.notifySupplierStakeholdersOfExperience(row)
+      .catch((e) => console.error('[review-email] supplier stakeholders:', e.message));
   }
   const full = await Experience.findByPk(row.id, { include: [CATEGORY, TYPE] });
   return created(res, { listing: toHostListing(full), form: toHostForm(full) }, submit ? 'Submitted for review' : 'Saved as draft');

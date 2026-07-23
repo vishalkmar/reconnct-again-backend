@@ -342,15 +342,18 @@ const upRespond = asyncHandler(async (req, res) => {
   // told at the same moment as Center Ops and must acknowledge in writing.
   // (A rejection never reaches them — nothing is being asked of them.)
   if (decision === 'approve' && item.supplierId) {
-    await reviewNotify.notify({
-      recipientType: 'supplier',
-      recipientId: item.supplierId,
+    const deadline = item.qcReview?.bdDeadline || null;
+    // In-app bell + FCM push to the supplier's phone.
+    await reviewNotify.notifySupplier(item.supplierId, {
       experienceId: item.id,
       kind: 'up_supplier_request',
       title: `Action needed on "${item.name}"`,
-      message: `${item.qcReview?.changeDetails || 'Changes were requested after the on-site check.'} Please confirm you've seen this.`,
-      meta: { experienceName: item.name, deadline: item.qcReview?.bdDeadline || null },
+      message: `${item.qcReview?.changeDetails || 'Changes were requested after the on-site check.'}${deadline ? ` Please complete by ${deadline}.` : ''}`,
+      meta: { experienceName: item.name, deadline },
     }).catch(() => {});
+    // And an email spelling out the deadline.
+    reviewEmail.notifySupplierChangeDeadline({ exp: item, deadline, details: item.qcReview?.changeDetails })
+      .catch((e) => console.error('[review-email] supplier deadline:', e.message));
   }
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });

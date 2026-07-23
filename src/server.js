@@ -327,6 +327,14 @@ const start = async () => {
     console.log(`[SERVER] API base: http://localhost:${PORT}/api`);
     console.log(`[SERVER] PWA API base: http://localhost:${PORT}/api/pwa`);
     console.log('[SERVER] Socket.io initialized');
+    // Push diagnostic — if this says NOT configured, no FCM push (booking,
+    // review, review-request) will EVER be delivered, no matter the app.
+    // Set FIREBASE_SERVICE_ACCOUNT (the full service-account JSON) to enable.
+    try {
+      // eslint-disable-next-line global-require
+      const { isConfigured } = require('./config/firebaseAdmin');
+      console.log(`[SERVER] Push (FCM): ${isConfigured() ? 'configured ✓' : 'NOT configured — set FIREBASE_SERVICE_ACCOUNT to enable push'}`);
+    } catch { /* ignore */ }
     console.log('[SERVER] READY — accepting requests');
   });
 
