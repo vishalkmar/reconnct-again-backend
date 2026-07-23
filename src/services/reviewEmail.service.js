@@ -136,12 +136,11 @@ const notifySubmitterDecision = async ({ exp, kind, note, extraRows = [] }) => {
 /* ── 3. Content approved → QCOPS visit scheduled ───────────────────────── */
 
 // The supplier has to physically get the place ready, so they're told first.
-const notifySupplierQcVisit = async ({ exp, qc }) => {
+const notifySupplierQcVisit = async ({ exp }) => {
   const to = (await supplierContact(exp)) || (await submitterContact(exp));
   if (!to?.email) return;
-  const when = qc?.visitDate ? `${qc.visitDate}${qc.visitTime ? ` at ${qc.visitTime}` : ''}` : 'shortly';
   const html = emailShell({
-    preheader: `${exp.name} is on its way — a team member may visit the location`,
+    preheader: `${exp.name} is on its way — our quality team will coordinate a visit`,
     eyebrow: 'On the way 🚀',
     heading: escape(exp.name || 'Your experience'),
     bodyHtml: `
@@ -149,16 +148,15 @@ const notifySupplierQcVisit = async ({ exp, qc }) => {
         Hi ${escape(to.name || 'there')}, your experience has cleared content review and is on its way to going live.
       </p>
       <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
-        <strong>A member of our quality team may visit the location</strong> to verify it in person.
-        Please make sure everything is in good order — the space, the facilities and anything listed
-        in your experience — so the visit goes smoothly.
+        <strong>A member of our quality team will get in touch to arrange an on-site visit</strong>, usually within
+        24–48 hours, to verify it in person. Please keep everything in good order — the space, the facilities and
+        anything listed — and be ready to confirm a convenient time when they reach out.
       </p>
-      ${calloutBox('Expected visit', escape(when))}
-      ${detailRows(exp, qc?.instructions ? [['What they will check', escape(qc.instructions)]] : [])}
+      ${detailRows(exp)}
       ${ctaButton(SUPPLIER_PORTAL_URL, 'View your listing')}
     `,
   });
-  const text = `${exp.name} is on its way to going live. A member of our quality team may visit the location (${when}) to verify it — please keep everything in good order.`;
+  const text = `${exp.name} is on its way to going live. Our quality team will contact you within 24–48 hours to arrange an on-site visit — please keep everything in good order and be ready to confirm a time.`;
   await mail({ to: to.email, subject: `Get ready — a quality visit is coming for "${exp.name}"`, html, text });
 };
 
@@ -167,7 +165,21 @@ const notifyQcopsAssignment = async ({ exp, qcopsId, qc }) => {
   if (!qcopsId) return;
   const m = await TeamMember.findByPk(qcopsId, { attributes: ['id', 'name', 'email'] });
   if (!m?.email) return;
-  const when = qc?.visitDate ? `${qc.visitDate}${qc.visitTime ? ` at ${qc.visitTime}` : ''}` : 'TBC';
+
+  // Full supplier + site details so QCOPS can coordinate the timing directly.
+  const sup = exp.supplierId ? await Supplier.findByPk(exp.supplierId, { attributes: ['companyName', 'supplierName', 'email', 'phone'] }) : null;
+  const siteAddress = [exp.location, exp.nearbyLocation, exp.city].filter(Boolean).join(', ');
+  const heading = qc?.turnaroundHeading || 'Turnaround time';
+  const note = qc?.turnaroundNote || 'Turnaround time for the Quality check is 24 to 48 hrs. Coordinate with the supplier for their availability.';
+
+  const supplierRows = [
+    sup?.companyName ? ['Supplier', escape(sup.companyName)] : null,
+    sup?.supplierName ? ['Contact person', escape(sup.supplierName)] : null,
+    sup?.phone ? ['Phone', escape(sup.phone)] : null,
+    sup?.email ? ['Email', escape(sup.email)] : null,
+    siteAddress ? ['Site address', escape(siteAddress)] : null,
+  ];
+
   const html = emailShell({
     preheader: `On-site check assigned: ${exp.name}`,
     eyebrow: 'On-site check assigned',
@@ -175,16 +187,43 @@ const notifyQcopsAssignment = async ({ exp, qcopsId, qc }) => {
     bodyHtml: `
       <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
         Hi ${escape(m.name || 'there')}, an on-site quality check has been assigned to you.
-        Please open your dashboard to acknowledge it, confirm when you're on-site, and submit your
-        feedback so the listing can move to the next step.
       </p>
-      ${calloutBox('Your visit', escape(when))}
-      ${detailRows(exp, qc?.instructions ? [['Instructions', escape(qc.instructions)]] : [])}
-      ${ctaButton(TEAM_PORTAL_URL, 'Open My QC Visits')}
+      ${calloutBox(escape(heading), escape(note))}
+      <p style="color:#374151;line-height:1.6;margin:16px 0 6px;font-weight:700;">Supplier details — coordinate the visit timing with them</p>
+      ${kvTable(supplierRows)}
+      <p style="color:#374151;line-height:1.6;margin:18px 0 6px;">
+        Once you've agreed a time, open your dashboard and <strong>send your acknowledgement with your schedule of visit</strong>.
+      </p>
+      ${detailRows(exp)}
+      ${ctaButton(TEAM_PORTAL_URL.replace('/login', '') + '/qc-visits', 'Open My QC Visits')}
     `,
   });
-  const text = `On-site check assigned: ${exp.name} (${when}). Open your dashboard to acknowledge and submit feedback: ${TEAM_PORTAL_URL}`;
-  await mail({ to: m.email, subject: `On-site check assigned: "${exp.name}"`, html, text });
+  const text = `On-site check assigned: ${exp.name}. ${heading}: ${note}\nSupplier: ${sup?.companyName || '—'}${sup?.phone ? ` · ${sup.phone}` : ''}${sup?.email ? ` · ${sup.email}` : ''}${siteAddress ? `\nSite: ${siteAddress}` : ''}\nAgree a time with the supplier, then send your acknowledgement with your schedule: ${TEAM_PORTAL_URL}`;
+  await mail({ to: m.email, subject: `On-site check assigned: "${exp.name}" — coordinate & schedule`, html, text });
+};
+
+// QCOPS sent back their acknowledgement + schedule → Center Ops is told when.
+const notifyCopsQcSchedule = async ({ exp, qcopsName, visitDate, visitTime, note }) => {
+  const copsId = exp.qcReview?.assignedByCopsId;
+  if (!copsId) return;
+  const m = await TeamMember.findByPk(copsId, { attributes: ['id', 'name', 'email'] });
+  if (!m?.email) return;
+  const when = `${visitDate}${visitTime ? ` at ${visitTime}` : ''}`;
+  const html = emailShell({
+    preheader: `${qcopsName} scheduled the QC visit for ${exp.name}`,
+    eyebrow: 'QC visit scheduled',
+    heading: escape(exp.name || 'Experience'),
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        ${escape(qcopsName || 'QCOPS')} has acknowledged the on-site check and set a visit time.
+      </p>
+      ${calloutBox('Scheduled visit', escape(when))}
+      ${detailRows(exp, note ? [['QCOPS note', escape(note)]] : [])}
+      ${ctaButton(TEAM_PORTAL_URL.replace('/login', '') + '/review-queue', 'Open the review queue')}
+    `,
+  });
+  const text = `${qcopsName} scheduled the QC visit for ${exp.name}: ${when}.${note ? ` Note: ${note}` : ''}`;
+  await mail({ to: m.email, subject: `QC visit scheduled: "${exp.name}" — ${when}`, html, text });
 };
 
 /* ── 4. QCOPS submitted feedback → Center Ops + the submitter ──────────── */
@@ -399,6 +438,7 @@ module.exports = {
   notifySupplierStakeholdersOfExperience,
   notifySupplierStakeholdersOfDecision,
   notifyQcopsWentLive,
+  notifyCopsQcSchedule,
   notifySupplierChangeDeadline,
   notifySubmitterDecision,
   notifySupplierQcVisit,

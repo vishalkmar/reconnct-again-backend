@@ -80,16 +80,41 @@ const notifyAssigner = (item, payload) => {
   return reviewNotify.notify({ recipientType: 'team', recipientId: copsId, experienceId: item.id, ...payload }).catch(() => {});
 };
 
-// POST /api/team/qc/:id/ack — "Got it" (received the assignment).
+// POST /api/team/qc/:id/ack  { visitDate, visitTime, note? }
+// "Send acknowledgement with your schedule of visit." QCOPS now sets the
+// date/time themselves (after coordinating with the supplier) and writes a
+// note back to Center Ops. The date/time they pick is what later unlocks the
+// "I'm at the location" button.
 const ack = asyncHandler(async (req, res) => {
   const { item, err } = await ownAssigned(req, req.params.id);
   if (err === 'notfound') return fail(res, 'Not found', 404);
   if (err === 'forbidden') return fail(res, 'Not your assignment', 403);
-  item.qcReview = { ...(item.qcReview || {}), status: 'acknowledged', acknowledgedAt: new Date().toISOString() };
+
+  const visitDate = String(req.body?.visitDate || '').trim();
+  const visitTime = String(req.body?.visitTime || '').trim();
+  const note = String(req.body?.note || '').trim();
+  if (!visitDate || !visitTime) return fail(res, 'Pick your visit date and time', 400);
+
+  item.qcReview = {
+    ...(item.qcReview || {}),
+    status: 'acknowledged',
+    visitDate,
+    visitTime,
+    ackNote: note || null,
+    acknowledgedAt: new Date().toISOString(),
+  };
   item.reviewStage = 'qc_acknowledged';
   await item.save();
-  await notifyAssigner(item, { kind: 'qc_ack', title: `QCOPS acknowledged: "${item.name}"`, message: `${req.teamMember.name} received the visit assignment.` });
-  return ok(res, { item: item.toJSON() }, 'Acknowledged');
+
+  await notifyAssigner(item, {
+    kind: 'qc_ack',
+    title: `QCOPS scheduled the visit: "${item.name}"`,
+    message: `${req.teamMember.name} will visit on ${visitDate} at ${visitTime}.${note ? ` Note: ${note}` : ''}`,
+    meta: { visitDate, visitTime, note },
+  });
+  reviewEmail.notifyCopsQcSchedule({ exp: item, qcopsName: req.teamMember.name, visitDate, visitTime, note })
+    .catch((e) => console.error('[review-email] qc schedule:', e.message));
+  return ok(res, { item: item.toJSON() }, 'Acknowledgement sent with your schedule');
 });
 
 // POST /api/team/qc/:id/onsite — "I'm at the place point" (visit day).

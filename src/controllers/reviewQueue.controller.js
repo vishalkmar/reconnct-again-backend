@@ -491,11 +491,11 @@ const sendQcops = asyncHandler(async (req, res) => {
     return fail(res, 'Finish the content review (Final Approve) before scheduling a QCOPS visit', 400);
   }
 
-  const visitDate = String(req.body?.visitDate || '').trim();
-  const visitTime = String(req.body?.visitTime || '').trim();
-  const instructions = String(req.body?.instructions || '').trim();
-  if (!visitDate || !visitTime) return fail(res, 'Choose a visit date and time', 400);
-  if (!instructions) return fail(res, 'Add instructions for the QCOPS visit', 400);
+  // Center Ops no longer picks the date/time — QCOPS now coordinates the timing
+  // directly with the supplier and sends back their own schedule with the
+  // acknowledgement. COPS just hands it over with a standard turnaround note.
+  const TURNAROUND_HEADING = 'Turnaround time';
+  const TURNAROUND_NOTE = 'Turnaround time for the Quality check is 24 to 48 hrs. Coordinate with the supplier — details are given below — for the timing of the supplier\'s availability.';
 
   const qcops = await pickLeastLoadedQcops();
   if (!qcops) return fail(res, 'No active QCOPS account is available', 400);
@@ -504,9 +504,8 @@ const sendQcops = asyncHandler(async (req, res) => {
   item.reviewStage = 'qc_assigned';
   item.qcReview = {
     status: 'assigned',
-    visitDate,
-    visitTime,
-    instructions,
+    turnaroundHeading: TURNAROUND_HEADING,
+    turnaroundNote: TURNAROUND_NOTE,
     assignedByCopsId: req.teamMember ? req.teamMember.id : null,
     assignedAt: new Date().toISOString(),
   };
@@ -516,8 +515,8 @@ const sendQcops = asyncHandler(async (req, res) => {
     recipientType: 'team', recipientId: qcops.id, experienceId: item.id,
     kind: 'qcops',
     title: `On-site quality check assigned: "${item.name}"`,
-    message: `Visit on ${visitDate} at ${visitTime}. ${instructions}`,
-    meta: { experienceName: item.name, visitDate, visitTime, instructions },
+    message: `${TURNAROUND_HEADING}: ${TURNAROUND_NOTE}`,
+    meta: { experienceName: item.name, turnaroundNote: TURNAROUND_NOTE },
   }).catch(() => {});
   // "First level approved" — tell the submitter it's cleared content review and
   // is now in the on-site quality-check stage.
@@ -525,10 +524,11 @@ const sendQcops = asyncHandler(async (req, res) => {
     kind: 'section_approved',
     title: `"${item.name}" cleared content review`,
     message: 'It’s now in the on-site quality-check stage — a team member may visit the location.',
-    meta: { experienceName: item.name, visitDate, visitTime },
+    meta: { experienceName: item.name },
   }).catch(() => {});
-  // The supplier is the one who has to have the place ready, and the assigned
-  // QCOPS is the one who has to go — both get told by email, not just in-app.
+  // The supplier is told to keep the place ready; the assigned QCOPS gets the
+  // turnaround note PLUS the supplier's full contact + site details so they can
+  // coordinate the visit timing directly.
   reviewEmail.notifySupplierQcVisit({ exp: item, qc: item.qcReview })
     .catch((e) => console.error('[review-email] qc visit (supplier):', e.message));
   reviewEmail.notifyQcopsAssignment({ exp: item, qcopsId: qcops.id, qc: item.qcReview })
