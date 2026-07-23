@@ -58,19 +58,38 @@ const ensureStatusEnumHasPendingReview = async (changes) => {
 
 /*
   The maxSuppliers column first shipped with DEFAULT 30. The baseline was later
-  fixed to 20 (and 20 is now a hard floor). This runs ONCE: when the column's
-  default is still the old 30, drop any leftover-default rows to 20 and set the
-  column default to 20. Guarded by the column default itself, so a later run —
-  and any admin who deliberately sets 30 afterwards — is never touched.
+  fixed to 20 (and 20 is now a hard floor). This runs ONCE to drop the leftover
+  old-default rows (30) down to 20.
+
+  We can't guard on the column default: in dev the app runs sync({alter:true})
+  BEFORE these migrations, and it already rewrote the default to 20 (the model's
+  value) without touching existing rows — so "is the default still 30?" would
+  wrongly skip. Instead we stamp a marker in the column COMMENT once the fix has
+  run, and skip on any later boot. A MODIFY with no diff (default 20 already
+  matches the model) never re-issues, so the marker survives — and a 30 an admin
+  deliberately sets AFTER this is never reset.
 */
+const BASELINE_MARKER = 'kam_baseline_v1';
+
+const maxSuppliersComment = async () => {
+  try {
+    const [rows] = await sequelize.query("SHOW FULL COLUMNS FROM `team_members` LIKE 'maxSuppliers'");
+    return rows[0] ? (rows[0].Comment || '') : null;
+  } catch {
+    return null;
+  }
+};
+
 const ensureMaxSuppliersBaseline20 = async (changes) => {
-  const col = await describeColumn('team_members', 'maxSuppliers');
-  if (!col) return; // addColumnIfMissing will create it with DEFAULT 20 below.
-  if (String(col.Default) !== '30') return; // already normalised.
+  const comment = await maxSuppliersComment();
+  if (comment === null) return; // column doesn't exist yet (shouldn't happen post-add).
+  if (comment.includes(BASELINE_MARKER)) return; // already normalised once.
   try {
     await sequelize.query('UPDATE `team_members` SET `maxSuppliers` = 20 WHERE `maxSuppliers` = 30');
-    await sequelize.query('ALTER TABLE `team_members` MODIFY COLUMN `maxSuppliers` INT NOT NULL DEFAULT 20');
-    changes.push('team_members.maxSuppliers baseline moved 30 → 20');
+    await sequelize.query(
+      `ALTER TABLE \`team_members\` MODIFY COLUMN \`maxSuppliers\` INT NOT NULL DEFAULT 20 COMMENT '${BASELINE_MARKER}'`
+    );
+    changes.push('team_members.maxSuppliers baseline normalised 30 → 20');
   } catch (err) {
     changes.push(`team_members.maxSuppliers baseline fix failed: ${err.message}`);
   }
