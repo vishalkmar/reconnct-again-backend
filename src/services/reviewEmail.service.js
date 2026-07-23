@@ -18,6 +18,10 @@ const {
 
 const TEAM_PORTAL_URL = process.env.TEAM_PORTAL_URL || 'https://reconnct-again-frontend.vercel.app/team/login';
 const SUPPLIER_PORTAL_URL = process.env.SUPPLIER_PORTAL_URL || 'https://reconnct-again-frontend.vercel.app/supplier/login';
+// Public site + app — the direct links a "went live" email points guests/owners to.
+const PUBLIC_WEB_URL = process.env.PUBLIC_WEB_URL || 'https://reconnct-again-frontend.vercel.app';
+const APP_URL = process.env.APP_DOWNLOAD_URL || 'https://reconnct.app/app';
+const experienceLink = (exp) => `${PUBLIC_WEB_URL}/experiences/${exp.slug || exp.id}`;
 
 // Who submitted this experience → where a decision email should land.
 // BD-submitted goes to that BD; a supplier's own submission goes to them.
@@ -383,6 +387,156 @@ const notifySupplierChangeDeadline = async ({ exp, deadline, details }) => {
   await mail({ to: to.email, subject: `Action needed on "${exp.name}"${deadline ? ` by ${deadline}` : ''}`, html, text });
 };
 
+/*
+  A listing went LIVE — the single place that tells EVERYONE, with the right
+  message and BOTH email + in-app notification each:
+    • Supplier (the experience's owner) — links to see it on web + app, plus who
+      their Key Account Manager is for any query.
+    • Key Account Manager — one more of their supplier's experiences is live.
+    • BD — only if a BD onboarded this listing.
+    • Center Ops — all active COPS.
+    • QCOPS — the one who ran the on-site check.
+*/
+const notifyWentLive = async (exp) => {
+  // eslint-disable-next-line global-require
+  const reviewNotify = require('./reviewNotify.service');
+  const link = experienceLink(exp);
+  const supplier = exp.supplierId
+    ? await Supplier.findByPk(exp.supplierId, { attributes: ['id', 'companyName', 'email', 'accountManagerId'] })
+    : null;
+  const kam = supplier?.accountManagerId
+    ? await TeamMember.findByPk(supplier.accountManagerId, { attributes: ['id', 'name', 'email'] })
+    : null;
+
+  // 1. SUPPLIER — email (links + KAM info) + in-app + push.
+  if (supplier?.email) {
+    const html = emailShell({
+      preheader: `${exp.name} is now live on reconnct`,
+      eyebrow: 'You are live 🎉',
+      heading: escape(exp.name || 'Your experience'),
+      bodyHtml: `
+        <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+          Great news — <strong>${escape(exp.name || 'your experience')}</strong> passed every check and is now published on
+          the reconnct website and app. Guests can find and book it right away.
+        </p>
+        ${ctaButton(link, 'View it on the website')}
+        ${ctaButton(APP_URL, 'Open it in the app')}
+        ${kam ? `
+          <p style="color:#374151;line-height:1.6;margin:20px 0 6px;font-weight:700;">Any questions? Your account manager can help</p>
+          ${kvTable([['Manager', escape(kam.name || '—')], kam.email ? ['Email', escape(kam.email)] : null])}
+        ` : ''}
+      `,
+    });
+    const text = `${exp.name} is now live on reconnct.\nWebsite: ${link}\nApp: ${APP_URL}${kam ? `\nYour account manager: ${kam.name}${kam.email ? ` (${kam.email})` : ''}` : ''}`;
+    await mail({ to: supplier.email, subject: `You're live: "${exp.name}" is on reconnct 🎉`, html, text });
+  }
+  if (supplier?.id) {
+    reviewNotify.notifySupplier(supplier.id, {
+      experienceId: exp.id, kind: 'live',
+      title: `"${exp.name}" is now live 🎉`,
+      message: 'Your experience passed every check and is published on the website and app.',
+    }).catch(() => {});
+  }
+
+  // 2. KAM — email + in-app.
+  if (kam) {
+    if (kam.email) {
+      const html = emailShell({
+        preheader: `${exp.name} (${supplier?.companyName || 'your supplier'}) is now live`,
+        eyebrow: 'Supplier listing live 🎉',
+        heading: escape(exp.name || 'Experience'),
+        bodyHtml: `
+          <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+            Hi ${escape(kam.name || 'there')}, one more experience from <strong>${escape(supplier?.companyName || 'your supplier')}</strong> is
+            now live. Do have a look and check in with the supplier in case of any problem.
+          </p>
+          ${detailRows(exp, [['Supplier', escape(supplier?.companyName || '—')]])}
+          ${ctaButton(link, 'View the live listing')}
+        `,
+      });
+      const text = `${exp.name} from ${supplier?.companyName || 'your supplier'} is now live. Have a look: ${link}`;
+      await mail({ to: kam.email, subject: `Live: "${exp.name}" from ${supplier?.companyName || 'your supplier'}`, html, text });
+    }
+    reviewNotify.notify({
+      recipientType: 'team', recipientId: kam.id, experienceId: exp.id, kind: 'live',
+      title: `Supplier listing live: "${exp.name}"`,
+      message: `One more experience from ${supplier?.companyName || 'your supplier'} is now live.`,
+    }).catch(() => {});
+  }
+
+  // 3. BD — only when a BD onboarded this listing.
+  if (exp.createdByTeamMemberId) {
+    const bd = await TeamMember.findByPk(exp.createdByTeamMemberId, { attributes: ['id', 'name', 'email', 'roleType'] });
+    if (bd?.roleType === 'bd') {
+      if (bd.email) {
+        const html = emailShell({
+          preheader: `${exp.name} you onboarded is now live`,
+          eyebrow: 'Your listing is live 🎉',
+          heading: escape(exp.name || 'Experience'),
+          bodyHtml: `
+            <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+              Hi ${escape(bd.name || 'there')}, the experience you onboarded${supplier?.companyName ? ` for <strong>${escape(supplier.companyName)}</strong>` : ''}
+              is now live on the website and app.
+            </p>
+            ${detailRows(exp, supplier?.companyName ? [['Supplier', escape(supplier.companyName)]] : [])}
+            ${ctaButton(link, 'View the live listing')}
+          `,
+        });
+        const text = `The experience you onboarded, ${exp.name}, is now live: ${link}`;
+        await mail({ to: bd.email, subject: `Live: "${exp.name}" is now on the website`, html, text });
+      }
+      reviewNotify.notify({
+        recipientType: 'team', recipientId: bd.id, experienceId: exp.id, kind: 'live',
+        title: `Your listing is live: "${exp.name}"`,
+        message: `The experience you onboarded${supplier?.companyName ? ` for ${supplier.companyName}` : ''} is now live.`,
+      }).catch(() => {});
+    }
+  }
+
+  // 4. Center Ops — all active.
+  const copsTeam = await TeamMember.findAll({ where: { roleType: 'cops', isActive: true }, attributes: ['id', 'name', 'email'] });
+  await Promise.all(copsTeam.map(async (c) => {
+    if (c.email) {
+      const html = emailShell({
+        preheader: `${exp.name} is now live`,
+        eyebrow: 'Now live 🎉',
+        heading: escape(exp.name || 'Experience'),
+        bodyHtml: `
+          <p style="color:#374151;line-height:1.6;margin:0 0 16px;">A listing has completed the full onboarding flow and is now live on the website and app.</p>
+          ${detailRows(exp, supplier?.companyName ? [['Supplier', escape(supplier.companyName)]] : [])}
+          ${ctaButton(link, 'View the live listing')}
+        `,
+      });
+      await mail({ to: c.email, subject: `Now live: "${exp.name}"`, html, text: `${exp.name} is now live: ${link}` });
+    }
+    reviewNotify.notify({
+      recipientType: 'team', recipientId: c.id, experienceId: exp.id, kind: 'live',
+      title: `Now live: "${exp.name}"`, message: 'A listing completed onboarding and is live.',
+    }).catch(() => {});
+  }));
+
+  // 5. QCOPS who checked it.
+  if (exp.qcopsTeamMemberId) {
+    const q = await TeamMember.findByPk(exp.qcopsTeamMemberId, { attributes: ['id', 'name', 'email'] });
+    if (q?.email) {
+      const html = emailShell({
+        preheader: `${exp.name} you checked is now live`,
+        eyebrow: 'Now live 🎉',
+        heading: escape(exp.name || 'Experience'),
+        bodyHtml: `
+          <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+            Hi ${escape(q.name || 'there')}, a listing you checked on-site has passed and is now live.
+          </p>
+          ${detailRows(exp)}
+          ${ctaButton(link, 'View the live listing')}
+        `,
+      });
+      await mail({ to: q.email, subject: `Now live: "${exp.name}"`, html, text: `A listing you checked is now live: ${exp.name} — ${link}` });
+    }
+    // In-app to QCOPS is emitted by publishLive already.
+  }
+};
+
 /* ── The QCOPS who checked a listing is told it went live ─────────────── */
 const notifyQcopsWentLive = async ({ exp }) => {
   if (!exp?.qcopsTeamMemberId) return;
@@ -438,6 +592,7 @@ module.exports = {
   notifySupplierStakeholdersOfExperience,
   notifySupplierStakeholdersOfDecision,
   notifyQcopsWentLive,
+  notifyWentLive,
   notifyCopsQcSchedule,
   notifySupplierChangeDeadline,
   notifySubmitterDecision,

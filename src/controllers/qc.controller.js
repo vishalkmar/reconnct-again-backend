@@ -224,21 +224,13 @@ const publishLive = async (item, copsId) => {
   item.data = { ...(item.data || {}), listedAt: item.data?.listedAt || new Date().toISOString(), ...((item.ownerUserId || item.supplierId) ? { hostStatus: 'approved' } : {}) };
   await item.save();
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
-  await reviewNotify.notifySubmitter(item, {
-    kind: 'approved',
-    title: `"${item.name}" is now live 🎉`,
-    message: 'It passed the quality check and is published on the website and app.',
-    meta: { experienceName: item.name },
-  }).catch(() => {});
-  // Also ping the QCOPS who checked it, so their board moves it to Approved/Live.
+  // Ping the QCOPS who checked it, so their board moves it to Approved/Live.
   if (item.qcopsTeamMemberId) {
     reviewNotify.notify({ recipientType: 'team', recipientId: item.qcopsTeamMemberId, experienceId: item.id, kind: 'approved', title: `"${item.name}" is now live`, message: 'The listing you checked went live.' }).catch(() => {});
   }
-  // Emails: the submitter (you're live), the QCOPS who signed it off, and the
-  // supplier's KAM + BD on a direct-onboarded listing.
-  reviewEmail.notifySubmitterDecision({ exp: item, kind: 'live' }).catch(() => {});
-  reviewEmail.notifyQcopsWentLive({ exp: item }).catch(() => {});
-  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'live').catch(() => {});
+  // One place tells EVERYONE (supplier + KAM + BD + COPS + QCOPS), email AND
+  // in-app, with the right message each — see reviewEmail.notifyWentLive.
+  reviewEmail.notifyWentLive(item).catch((e) => console.error('[review-email] went live:', e.message));
   reviewNotify.emitQueueChanged({ experienceId: item.id });
 };
 
