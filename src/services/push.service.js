@@ -20,10 +20,15 @@ const stringifyData = (data = {}) => {
 // callers never need to guard around either case. Clears a token that FCM
 // reports as dead so it doesn't keep failing forever.
 const sendPushToUser = async (userId, { title, body, data } = {}) => {
-  if (!isConfigured() || !userId) return;
+  // Every skip used to be silent, which made "push isn't arriving" impossible
+  // to diagnose — you couldn't tell config from a missing token from a send
+  // error. Each reason now says so once, cheaply.
+  if (!userId) return;
+  if (!isConfigured()) { console.warn('[push] skipped (user %s): FCM not configured', userId); return; }
   try {
     const user = await User.findByPk(userId);
-    if (!user || !user.fcmToken) return;
+    if (!user) { console.warn('[push] skipped: no user %s', userId); return; }
+    if (!user.fcmToken) { console.warn('[push] skipped (user %s): no device token registered', userId); return; }
 
     const app = getApp();
     if (!app) return;

@@ -129,6 +129,34 @@ const list = asyncHandler(async (req, res) => {
     });
   }
 
+  /*
+    Review-pipeline pings addressed to this USER — the host half of the same
+    feed suppliers get: KAM assigned, objection raised, listing approved /
+    rejected / went live, deadline reminders. These are real persisted rows and
+    the DERIVED booking/wallet feed above never carried them, which is exactly
+    why a host saw the emails but an empty bell on both the app and the web
+    portal. (listForSupplier has had this merge; the user feed never did.)
+  */
+  const pings = await ReviewNotification.findAll({
+    where: { recipientType: 'user', recipientId: userId },
+    order: [['createdAt', 'DESC']],
+    limit: 50,
+  });
+  pings.forEach((p) => {
+    const j = p.toJSON();
+    feed.push({
+      id: `n${j.id}`,
+      // Tag them as host_booking-family so the owner-facing screens (which
+      // filter to host_booking/reminder) surface them too.
+      kind: j.kind || 'review',
+      title: j.title,
+      body: j.message || '',
+      at: j.createdAt,
+      readAt: j.readAt || null,
+      experienceId: j.experienceId || null,
+    });
+  });
+
   feed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
 
   const firstName = (user && user.name ? String(user.name).split(/\s+/)[0] : '') || '';
