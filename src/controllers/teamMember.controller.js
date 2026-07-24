@@ -83,11 +83,19 @@ const getOne = asyncHandler(async (req, res) => {
 // `permissions` (partial) overrides the role's defaults per-key — lets the
 // admin uncheck/check anything even at creation time.
 const create = asyncHandler(async (req, res) => {
-  const { name, email, roleType, permissions, maxSuppliers } = req.body || {};
+  const { name, email, phone, roleType, permissions, maxSuppliers } = req.body || {};
   if (!name || !email || !roleType) {
     return fail(res, 'name, email and roleType are required', 400);
   }
   if (!ROLE_TYPES.includes(roleType)) return fail(res, 'Invalid roleType', 400);
+  /*
+    A Key Account Manager's number is REQUIRED: the suppliers they look after
+    get a one-tap "Call" button on their app dashboard, and without a number
+    that button is dead. Other roles have no such surface, so it stays optional.
+  */
+  if (roleType === 'account_manager' && !String(phone || '').trim()) {
+    return fail(res, 'Phone number is required for an Account Manager — suppliers call them from the app', 400);
+  }
 
   const emailNorm = String(email).toLowerCase().trim();
   const existing = await TeamMember.findOne({ where: { email: emailNorm } });
@@ -109,6 +117,7 @@ const create = asyncHandler(async (req, res) => {
   const member = await TeamMember.create({
     name: String(name).trim(),
     email: emailNorm,
+    phone: phone ? String(phone).trim() : null,
     employeeCode,
     password,
     roleType,
@@ -130,8 +139,16 @@ const update = asyncHandler(async (req, res) => {
   const member = await TeamMember.findByPk(req.params.id);
   if (!member) return fail(res, 'Team member not found', 404);
 
-  const { name, permissions, isActive, password, maxSuppliers } = req.body || {};
+  const { name, phone, permissions, isActive, password, maxSuppliers } = req.body || {};
   if (name !== undefined) member.name = String(name).trim();
+  if (phone !== undefined) {
+    const next = String(phone || '').trim();
+    // Same rule on edit — a KAM must never end up without a reachable number.
+    if (!next && member.roleType === 'account_manager') {
+      return fail(res, 'Phone number is required for an Account Manager', 400);
+    }
+    member.phone = next || null;
+  }
   if (permissions !== undefined) member.permissions = { ...member.permissions, ...permissions };
   if (maxSuppliers !== undefined) {
     const cap = Number.parseInt(maxSuppliers, 10);

@@ -39,6 +39,8 @@ const addColumnIfMissing = async (table, column, definition, changes) => {
 const migrate = async () => {
   const changes = [];
   await addColumnIfMissing('suppliers', 'accountManagerId', 'INT NULL', changes);
+  // Hosts get a KAM too, from the same pool — see accountManager.service.
+  await addColumnIfMissing('users', 'accountManagerId', 'INT NULL', changes);
   return { changes };
 };
 

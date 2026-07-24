@@ -167,6 +167,9 @@ const create = asyncHandler(async (req, res) => {
   }
   const item = await Experience.create(data);
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
+  // A host owns their listings directly — they get a KAM from the same pool
+  // the first time one of those listings goes live.
+  if (item.ownerUserId) ensureHostAccountManagerAssigned(item.ownerUserId).catch(() => {});
   if (item.status === 'pending_review') {
     reviewNotify.notifyCopsTeam({
       experienceId: item.id,

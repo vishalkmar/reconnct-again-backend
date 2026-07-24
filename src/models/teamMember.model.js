@@ -70,6 +70,9 @@ const TeamMember = sequelize.define(
     id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
     name: { type: DataTypes.STRING(120), allowNull: false },
     email: { type: DataTypes.STRING(160), allowNull: false, validate: { isEmail: true } },
+    // Direct line, shown to the suppliers this member looks after so they can
+    // call their Key Account Manager straight from the app. Optional.
+    phone: { type: DataTypes.STRING(20), allowNull: true },
     // Immutable once set — admin can rename/re-email a member but this code
     // never changes, so it's a stable reference in QCOPS assignment lists,
     // round-robin logs, etc.

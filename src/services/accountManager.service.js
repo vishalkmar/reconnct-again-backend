@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { Supplier, TeamMember } = require('../models');
+const { Supplier, TeamMember, User } = require('../models');
 
 /*
   Account Manager round-robin — the moment ANY experience gets linked to a
@@ -22,13 +22,26 @@ const DEFAULT_MAX_SUPPLIERS = 20;
 
 // Active KAMs with their current load + cap. One query the pickers/capacity
 // checks all share.
+/*
+  A KAM's load is EVERY account they look after — suppliers AND hosts. Both come
+  out of the same pool and count against the same cap, so a KAM at 20 is at 20
+  whether those are 20 suppliers, 20 hosts, or a mix.
+*/
 const managerLoads = async () => {
   const managers = await TeamMember.findAll({ where: { roleType: 'account_manager', isActive: true } });
-  return Promise.all(managers.map(async (m) => ({
-    manager: m,
-    load: await Supplier.count({ where: { accountManagerId: m.id } }),
-    cap: Number(m.maxSuppliers) || DEFAULT_MAX_SUPPLIERS,
-  })));
+  return Promise.all(managers.map(async (m) => {
+    const [suppliers, hosts] = await Promise.all([
+      Supplier.count({ where: { accountManagerId: m.id } }),
+      User.count({ where: { accountManagerId: m.id } }),
+    ]);
+    return {
+      manager: m,
+      load: suppliers + hosts,
+      supplierCount: suppliers,
+      hostCount: hosts,
+      cap: Number(m.maxSuppliers) || DEFAULT_MAX_SUPPLIERS,
+    };
+  }));
 };
 
 // The least-loaded active KAM that still has room under its cap, or null when
@@ -114,6 +127,68 @@ const ensureAccountManagerAssigned = async (supplierId) => {
       meta: { managerName: pick.name, managerEmail: pick.email },
     }).catch(() => {});
   } catch (err) { console.error('[am-assign] notify wiring failed:', err.message); }
+};
+
+// Is this host's current manager still a real, usable contact?
+const hostHasUsableManager = async (user) => {
+  if (!user.accountManagerId) return false;
+  const current = await TeamMember.findByPk(user.accountManagerId, { attributes: ['id', 'isActive', 'roleType'] });
+  return !!(current && current.isActive && current.roleType === 'account_manager');
+};
+
+/*
+  The HOST half of the round-robin. Called the first time one of a host's
+  listings goes live — same pool, same cap, same "assigned once and kept"
+  rule as suppliers. Both sides get told immediately: the host learns who
+  looks after them, the KAM learns they have a new host.
+*/
+const ensureHostAccountManagerAssigned = async (userId) => {
+  if (!userId) return null;
+  const user = await User.findByPk(userId);
+  if (!user) return null;
+  if (await hostHasUsableManager(user)) return null;
+
+  const pick = await pickLeastLoaded();
+  if (!pick) return null;
+
+  user.accountManagerId = pick.id;
+  await user.save();
+
+  const hostName = user.name || user.email || 'A host';
+  try {
+    // eslint-disable-next-line global-require
+    const reviewEmail = require('./reviewEmail.service');
+    // eslint-disable-next-line global-require
+    const reviewNotify = require('./reviewNotify.service');
+
+    // 1. The KAM — email + in-app bell.
+    if (reviewEmail.notifyAmAssignedHost) {
+      reviewEmail.notifyAmAssignedHost({ manager: pick, host: user })
+        .catch((err) => console.error('[am-assign-host] manager email failed:', err.message));
+    }
+    reviewNotify.notify({
+      recipientType: 'team', recipientId: pick.id,
+      kind: 'am_assigned',
+      title: `New host assigned: "${hostName}"`,
+      message: `${hostName} is now assigned to you to guide and look after.`,
+      meta: { hostUserId: user.id, hostName, hostEmail: user.email },
+    }).catch(() => {});
+
+    // 2. The host — email + in-app bell, so they always know their contact.
+    if (reviewEmail.notifyHostOfManager) {
+      reviewEmail.notifyHostOfManager({ host: user, manager: pick })
+        .catch((err) => console.error('[am-assign-host] host email failed:', err.message));
+    }
+    reviewNotify.notify({
+      recipientType: 'user', recipientId: user.id,
+      kind: 'am_assigned',
+      title: 'You have a Key Account Manager',
+      message: `${pick.name} is here to help with your listings, bookings and payouts.`,
+      meta: { managerName: pick.name, managerEmail: pick.email, managerPhone: pick.phone || null },
+    }).catch(() => {});
+  } catch (err) { console.error('[am-assign-host] notify wiring failed:', err.message); }
+
+  return pick;
 };
 
 /*
@@ -206,7 +281,7 @@ const mayRespondToUp = async (exp, teamMemberId) => {
 };
 
 module.exports = {
-  ensureAccountManagerAssigned, reassignOrphanedSuppliers,
+  ensureAccountManagerAssigned, ensureHostAccountManagerAssigned, reassignOrphanedSuppliers,
   resolveUpResponder, canRespondToUp, mayRespondToUp,
   kamCapacity, managerLoads, DEFAULT_MAX_SUPPLIERS,
 };

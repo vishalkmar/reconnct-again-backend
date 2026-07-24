@@ -91,17 +91,20 @@ const notifySubmitter = async (exp, payload) => {
   const to = recipientForExperience(exp);
   if (!to) return null;
   const row = await notify({ ...to, experienceId: exp.id, ...payload });
-  if (to.recipientType === 'supplier') {
-    try {
-      // eslint-disable-next-line global-require
-      const { sendPushToSupplier } = require('./push.service');
-      sendPushToSupplier(to.recipientId, {
-        title: payload.title || 'Update on your listing',
-        body: payload.message || '',
-        data: { kind: payload.kind || 'review', experienceId: exp.id },
-      }).catch(() => {});
-    } catch { /* push optional */ }
-  }
+  // Push it to their phone too, so an objection/approval reaches the lock
+  // screen and not just the in-app bell. Hosts are Users, suppliers have their
+  // own token store — both are covered.
+  try {
+    // eslint-disable-next-line global-require
+    const { sendPushToSupplier, sendPushToUser } = require('./push.service');
+    const push = {
+      title: payload.title || 'Update on your listing',
+      body: payload.message || '',
+      data: { kind: payload.kind || 'review', experienceId: exp.id },
+    };
+    if (to.recipientType === 'supplier') sendPushToSupplier(to.recipientId, push).catch(() => {});
+    else if (to.recipientType === 'user') sendPushToUser(to.recipientId, push).catch(() => {});
+  } catch { /* push optional */ }
   return row;
 };
 

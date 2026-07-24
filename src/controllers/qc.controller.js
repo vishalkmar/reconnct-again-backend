@@ -8,7 +8,7 @@ const { validateQcFeedback, QC_FEEDBACK_FIELDS } = require('../utils/qcFeedback'
 const { istToInstant } = require('../utils/istTime');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
-const { ensureAccountManagerAssigned, resolveUpResponder } = require('../services/accountManager.service');
+const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned, resolveUpResponder } = require('../services/accountManager.service');
 
 let mailer = null;
 try { mailer = require('../pwa/services/mailer'); } catch { mailer = null; }
@@ -224,6 +224,11 @@ const publishLive = async (item, copsId) => {
   item.data = { ...(item.data || {}), listedAt: item.data?.listedAt || new Date().toISOString(), ...((item.ownerUserId || item.supplierId) ? { hostStatus: 'approved' } : {}) };
   await item.save();
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
+  // A host owns their listings directly — they get a KAM from the same pool
+  // the first time one of those listings goes live.
+  if (item.ownerUserId) ensureHostAccountManagerAssigned(item.ownerUserId).catch(() => {});
+  // The KAM (supplier or host) hears that one of their accounts just went live.
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'live').catch(() => {});
   // Ping the QCOPS who checked it, so their board moves it to Approved/Live.
   if (item.qcopsTeamMemberId) {
     reviewNotify.notify({ recipientType: 'team', recipientId: item.qcopsTeamMemberId, experienceId: item.id, kind: 'approved', title: `"${item.name}" is now live`, message: 'The listing you checked went live.' }).catch(() => {});
@@ -326,6 +331,8 @@ const delist = asyncHandler(async (req, res) => {
   item.status = 'archived';
   item.isActive = false;
   item.reviewStage = 'delisted';
+  // KAM of whoever owns it hears about the delisting.
+  reviewEmail.notifySupplierStakeholdersOfDecision(item, 'delisted', req.body?.reason).catch(() => {});
   item.data = { ...(item.data || {}), delistReason: reason, delistedAt: new Date().toISOString(), hostStatus: 'draft' };
   await item.save();
 

@@ -43,6 +43,13 @@ const User = sequelize.define(
     // to avoid float drift. (e.g. ₹100 = 10000)
     walletBalancePaise: { type: DataTypes.INTEGER, defaultValue: 0 },
 
+    /*
+      A host's Key Account Manager. Assigned by the SAME round-robin that
+      serves suppliers, the first time one of their listings goes live — a
+      host is a User who owns listings, so they get the same point of contact.
+      Null until then (and for users who never host anything).
+    */
+    accountManagerId: { type: DataTypes.INTEGER, allowNull: true },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
 

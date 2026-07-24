@@ -300,18 +300,101 @@ const notifyAmAssigned = async ({ manager, supplier }) => {
 };
 
 /*
+  Host counterparts of the two emails above. A host is a User who owns listings
+  directly; they get a KAM from the same pool the first time a listing of
+  theirs goes live, so both sides need the same introduction.
+*/
+const notifyAmAssignedHost = async ({ manager, host }) => {
+  if (!manager?.email) return;
+  const hostName = host.name || host.email || 'A host';
+  const html = emailShell({
+    preheader: `${hostName} is now assigned to you`,
+    eyebrow: 'New host assigned',
+    heading: escape(hostName),
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        Hi ${escape(manager.name || 'there')}, a host has just been assigned to you to guide and look after.
+      </p>
+      ${kvTable([
+    ['Host', escape(hostName)],
+    host.email ? ['Email', escape(host.email)] : null,
+    host.phone ? ['Phone', escape(host.phone)] : null,
+    host.city ? ['City', escape(host.city)] : null,
+  ])}
+      ${ctaButton(`${TEAM_PORTAL_URL.replace('/login', '')}/my-suppliers`, 'Open Assigned Accounts')}
+    `,
+  });
+  const text = `New host assigned to you: ${hostName} (${host.email || ''}).`;
+  await mail({ to: manager.email, subject: `New host assigned: "${hostName}"`, html, text });
+};
+
+const notifyHostOfManager = async ({ host, manager }) => {
+  if (!host?.email) return;
+  const html = emailShell({
+    preheader: `${manager.name} is your Key Account Manager`,
+    eyebrow: 'Your Key Account Manager',
+    heading: escape(manager.name || 'Your account manager'),
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        Hi ${escape(host.name || 'there')}, you now have a dedicated point of contact at reconnct.
+        Reach out to them for anything about your listings, bookings or payouts.
+      </p>
+      ${kvTable([
+    ['Name', escape(manager.name || '—')],
+    ['Role', 'Key Account Manager'],
+    manager.employeeCode ? ['Employee code', escape(manager.employeeCode)] : null,
+    manager.email ? ['Email', escape(manager.email)] : null,
+    manager.phone ? ['Phone', escape(manager.phone)] : null,
+  ])}
+      ${ctaButton(`${PUBLIC_WEB_URL}/host/account-manager`, 'View in your Host Portal')}
+    `,
+  });
+  const text = `Your Key Account Manager is ${manager.name} (${manager.email || ''}${manager.phone ? `, ${manager.phone}` : ''}).`;
+  await mail({ to: host.email, subject: 'You have a Key Account Manager', html, text });
+};
+
+/*
   Tell the two staff who look after a SUPPLIER — their Key Account Manager and
   the BD who onboarded them — about something on that supplier's OWN listing
   (a new experience, or a review decision). Both get an email AND an in-app
   bell notification. No-op unless the experience was supplier-submitted.
 */
+/*
+  Tell the staff who look after the OWNER of this experience — their Key
+  Account Manager (and, for a supplier, the BD who onboarded them) — that
+  something happened to it: added, went live, delisted or rejected.
+
+  Works for BOTH owner kinds. A supplier's KAM sits on the supplier row; a
+  host's KAM sits on their user row. BD-created experiences are skipped: the
+  BD already gets the submitter emails.
+*/
 const notifySupplierStakeholders = async (exp, { eyebrow, title, lead, subject, kind, extraRows = [] }) => {
-  if (!exp?.supplierId || exp.createdByTeamMemberId) return;
-  const supplier = await Supplier.findByPk(exp.supplierId, {
-    attributes: ['id', 'companyName', 'accountManagerId', 'createdByTeamMemberId'],
-  });
-  if (!supplier) return;
-  const staffIds = [...new Set([supplier.accountManagerId, supplier.createdByTeamMemberId].filter(Boolean))];
+  if (!exp || exp.createdByTeamMemberId) return;
+
+  let ownerLabel = null;
+  let staffIds = [];
+  let ownerMeta = {};
+
+  if (exp.supplierId) {
+    const supplier = await Supplier.findByPk(exp.supplierId, {
+      attributes: ['id', 'companyName', 'accountManagerId', 'createdByTeamMemberId'],
+    });
+    if (!supplier) return;
+    ownerLabel = supplier.companyName || '—';
+    ownerMeta = { supplierId: supplier.id };
+    staffIds = [...new Set([supplier.accountManagerId, supplier.createdByTeamMemberId].filter(Boolean))];
+  } else if (exp.ownerUserId) {
+    const host = await User.findByPk(exp.ownerUserId, {
+      attributes: ['id', 'name', 'email', 'accountManagerId'],
+    });
+    if (!host) return;
+    ownerLabel = host.name || host.email || 'Host';
+    ownerMeta = { hostUserId: host.id, hostEmail: host.email };
+    staffIds = [host.accountManagerId].filter(Boolean);
+  } else {
+    return;
+  }
+
   if (!staffIds.length) return;
   const staff = await TeamMember.findAll({ where: { id: staffIds, isActive: true }, attributes: ['id', 'name', 'email'] });
 
@@ -323,17 +406,17 @@ const notifySupplierStakeholders = async (exp, { eyebrow, title, lead, subject, 
     heading: escape(exp.name || 'Experience'),
     bodyHtml: `
       <p style="color:#374151;line-height:1.6;margin:0 0 16px;">${lead}</p>
-      ${detailRows(exp, [['Supplier', escape(supplier.companyName || '—')], ...extraRows])}
+      ${detailRows(exp, [[exp.supplierId ? 'Supplier' : 'Host', escape(ownerLabel)], ...extraRows])}
       ${ctaButton(TEAM_PORTAL_URL.replace('/login', '') + '/my-suppliers', 'Open your suppliers')}
     `,
   });
-  const text = `${lead.replace(/<[^>]+>/g, '')} — ${exp.name} (${supplier.companyName || 'supplier'}).`;
+  const text = `${lead.replace(/<[^>]+>/g, '')} — ${exp.name} (${ownerLabel}).`;
   await Promise.all(staff.map(async (m) => {
     if (m.email) await mail({ to: m.email, subject, html, text });
     reviewNotify.notify({
       recipientType: 'team', recipientId: m.id, experienceId: exp.id,
-      kind, title, message: `${exp.name} — ${supplier.companyName || 'your supplier'}`,
-      meta: { experienceName: exp.name, supplierId: supplier.id },
+      kind, title, message: `${exp.name} — ${ownerLabel}`,
+      meta: { experienceName: exp.name, ...ownerMeta },
     }).catch(() => {});
   }));
 };
@@ -351,14 +434,15 @@ const DECISION_STAKEHOLDER = {
   approved: { eyebrow: 'Content approved', verb: 'passed content review' },
   rejected: { eyebrow: 'Not approved', verb: 'was not approved' },
   live: { eyebrow: 'Now live', verb: 'is now live' },
+  delisted: { eyebrow: 'Delisted', verb: 'was delisted from the platform' },
 };
 const notifySupplierStakeholdersOfDecision = (exp, kind, note) => {
   const d = DECISION_STAKEHOLDER[kind];
   if (!d) return Promise.resolve();
   return notifySupplierStakeholders(exp, {
     eyebrow: d.eyebrow,
-    title: `Your supplier's listing ${d.verb}`,
-    lead: `A listing from a supplier you look after <strong>${escape(d.verb)}</strong>.`,
+    title: `A listing you look after ${d.verb}`,
+    lead: `A listing from an account you look after <strong>${escape(d.verb)}</strong>.`,
     subject: `Update on "${exp && exp.name}" — ${d.eyebrow}`,
     kind: `supplier_listing_${kind}`,
     extraRows: note ? [['Note', escape(note)]] : [],
@@ -404,9 +488,62 @@ const notifyWentLive = async (exp) => {
   const supplier = exp.supplierId
     ? await Supplier.findByPk(exp.supplierId, { attributes: ['id', 'companyName', 'email', 'accountManagerId'] })
     : null;
-  const kam = supplier?.accountManagerId
-    ? await TeamMember.findByPk(supplier.accountManagerId, { attributes: ['id', 'name', 'email'] })
+  // A host owns their listing directly (no supplier record) — they get the
+  // same congratulations, and their KAM is the one on their user row.
+  const host = exp.ownerUserId
+    ? await User.findByPk(exp.ownerUserId, { attributes: ['id', 'name', 'email', 'accountManagerId'] })
     : null;
+  const managerId = supplier?.accountManagerId || host?.accountManagerId || null;
+  const kam = managerId
+    ? await TeamMember.findByPk(managerId, { attributes: ['id', 'name', 'email', 'phone'] })
+    : null;
+
+  // 1b. HOST — same "you are live" email with the listing link + KAM info,
+  //     plus the in-app bell and a push to their phone.
+  if (host?.email) {
+    const html = emailShell({
+      preheader: `${exp.name} is now live on reconnct`,
+      eyebrow: 'You are live 🎉',
+      heading: escape(exp.name || 'Your experience'),
+      bodyHtml: `
+        <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+          Congratulations ${escape(host.name || 'there')} — <strong>${escape(exp.name || 'your experience')}</strong>
+          passed every check and is now published on the reconnct website and app. Guests can find and book it right away.
+        </p>
+        ${ctaButton(link, 'View it on the website')}
+        ${ctaButton(APP_URL, 'Open it in the app')}
+        ${kam ? `
+          <p style="color:#374151;line-height:1.6;margin:20px 0 6px;font-weight:700;">Any questions? Your account manager can help</p>
+          ${kvTable([
+    ['Manager', escape(kam.name || '—')],
+    kam.email ? ['Email', escape(kam.email)] : null,
+    kam.phone ? ['Phone', escape(kam.phone)] : null,
+  ])}
+        ` : ''}
+      `,
+    });
+    const text = `Congratulations! ${exp.name} is now live on reconnct.
+Website: ${link}
+App: ${APP_URL}`;
+    mail({ to: host.email, subject: `You are live: "${exp.name}" 🎉`, html, text }).catch(() => {});
+    reviewNotify.notify({
+      recipientType: 'user', recipientId: host.id,
+      kind: 'live',
+      experienceId: exp.id,
+      title: 'Your experience is live 🎉',
+      message: `"${exp.name}" is now published and open for bookings.`,
+      meta: { experienceName: exp.name, link },
+    }).catch(() => {});
+    try {
+      // eslint-disable-next-line global-require
+      const { sendPushToUser } = require('./push.service');
+      sendPushToUser(host.id, {
+        title: 'Your experience is live 🎉',
+        body: `"${exp.name}" is now published and open for bookings.`,
+        data: { kind: 'live', experienceId: exp.id },
+      }).catch(() => {});
+    } catch { /* push optional */ }
+  }
 
   // 1. SUPPLIER — email (links + KAM info) + in-app + push.
   if (supplier?.email) {
@@ -587,7 +724,7 @@ module.exports = {
   submitterContact,
   supplierContact,
   notifyCopsNewSubmission,
-  notifyAmAssigned,
+  notifyAmAssigned, notifyAmAssignedHost, notifyHostOfManager,
   notifySupplierOfManager,
   notifySupplierStakeholdersOfExperience,
   notifySupplierStakeholdersOfDecision,

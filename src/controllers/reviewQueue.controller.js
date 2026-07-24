@@ -11,7 +11,7 @@ const {
 const { copsTab, COPS_TABS } = require('../utils/experienceStatus');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
-const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('../services/accountManager.service');
 
 const INCLUDE = [
   { model: ExperienceCategory, as: 'category', attributes: ['id', 'name', 'slug', 'icon'] },
@@ -347,6 +347,9 @@ const directList = asyncHandler(async (req, res) => {
   item.data = { ...(item.data || {}), hostStatus: 'approved', listedAt: item.data?.listedAt || new Date().toISOString() };
   await item.save();
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
+  // A host owns their listings directly — they get a KAM from the same pool
+  // the first time one of those listings goes live.
+  if (item.ownerUserId) ensureHostAccountManagerAssigned(item.ownerUserId).catch(() => {});
 
   await reviewNotify.notifySubmitter(item, {
     kind: 'approved',

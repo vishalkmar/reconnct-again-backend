@@ -7,7 +7,7 @@ const {
 const { ok, created, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
 const { bookingLifecycle, durationMinutesOf } = require('../utils/bookingLifecycle');
-const { ensureAccountManagerAssigned } = require('../services/accountManager.service');
+const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('../services/accountManager.service');
 const {
   resetForNewRound, summarize, buildRoundResolutions, logResolutions, sectionChanged,
 } = require('../utils/reviewSections');
@@ -257,6 +257,9 @@ const toHostListing = (exp) => {
     city: j.city || j.location || '',
     rating: Number(j.rating) || 0,
     isPublished: j.status === 'published' && j.isActive,
+    // When the listing was added — drives the date filter on the owner's
+    // "My Listings" screens (app) the same way bookings filter on their date.
+    createdAt: j.createdAt,
     bookings: [], // real host-booking feed lands in a later phase
     // Center Ops section-review state so the host/supplier card can show
     // objections (with change status + chat history) + suggestion.
@@ -384,6 +387,7 @@ const createMine = asyncHandler(async (req, res) => {
   data.slug = await uniqueSlug(form.slug || data.name);
   const row = await Experience.create(data);
   if (row.supplierId) ensureAccountManagerAssigned(row.supplierId).catch(() => {});
+  if (row.ownerUserId) ensureHostAccountManagerAssigned(row.ownerUserId).catch(() => {});
   if (submit) {
     reviewNotify.notifyCopsTeam({ experienceId: row.id, kind: 'submitted', title: `New submission: "${row.name}"`, meta: { experienceName: row.name } }).catch(() => {});
     reviewEmail.notifyCopsNewSubmission({ exp: row, via: req.supplier ? req.supplier.companyName : '' })
