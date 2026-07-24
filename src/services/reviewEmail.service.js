@@ -170,14 +170,19 @@ const notifyQcopsAssignment = async ({ exp, qcopsId, qc }) => {
   const m = await TeamMember.findByPk(qcopsId, { attributes: ['id', 'name', 'email'] });
   if (!m?.email) return;
 
-  // Full supplier + site details so QCOPS can coordinate the timing directly.
-  const sup = exp.supplierId ? await Supplier.findByPk(exp.supplierId, { attributes: ['companyName', 'supplierName', 'email', 'phone'] }) : null;
-  const siteAddress = [exp.location, exp.nearbyLocation, exp.city].filter(Boolean).join(', ');
+  // Full owner + site details so QCOPS can coordinate the timing directly.
+  // Resolves a SUPPLIER or a HOST — a host-submitted listing has no supplier
+  // record, which is why these rows used to come through blank for hosts.
+  // eslint-disable-next-line global-require
+  const { ownerContactFor, siteAddressOf } = require('../utils/ownerContact');
+  const sup = await ownerContactFor(exp);
+  const siteAddress = siteAddressOf(exp);
   const heading = qc?.turnaroundHeading || 'Turnaround time';
   const note = qc?.turnaroundNote || 'Turnaround time for the Quality check is 24 to 48 hrs. Coordinate with the supplier for their availability.';
 
+  const ownerLabel = sup?.kind === 'host' ? 'Host' : 'Supplier';
   const supplierRows = [
-    sup?.companyName ? ['Supplier', escape(sup.companyName)] : null,
+    sup?.companyName ? [ownerLabel, escape(sup.companyName)] : null,
     sup?.supplierName ? ['Contact person', escape(sup.supplierName)] : null,
     sup?.phone ? ['Phone', escape(sup.phone)] : null,
     sup?.email ? ['Email', escape(sup.email)] : null,
@@ -193,7 +198,7 @@ const notifyQcopsAssignment = async ({ exp, qcopsId, qc }) => {
         Hi ${escape(m.name || 'there')}, an on-site quality check has been assigned to you.
       </p>
       ${calloutBox(escape(heading), escape(note))}
-      <p style="color:#374151;line-height:1.6;margin:16px 0 6px;font-weight:700;">Supplier details — coordinate the visit timing with them</p>
+      <p style="color:#374151;line-height:1.6;margin:16px 0 6px;font-weight:700;">${ownerLabel} details — coordinate the visit timing with them</p>
       ${kvTable(supplierRows)}
       <p style="color:#374151;line-height:1.6;margin:18px 0 6px;">
         Once you've agreed a time, open your dashboard and <strong>send your acknowledgement with your schedule of visit</strong>.
@@ -675,6 +680,61 @@ App: ${APP_URL}`;
 };
 
 /* ── The QCOPS who checked a listing is told it went live ─────────────── */
+/*
+  QCOPS tapped "I'm at the location" — tell the Center Ops person who assigned
+  the visit, with everything they'd want to know at a glance: who is on site,
+  where exactly, and which experience is being checked.
+*/
+const notifyCopsQcOnsite = async ({ exp, qcops }) => {
+  const copsId = exp?.qcReview?.assignedByCopsId;
+  if (!copsId) return;
+  const cops = await TeamMember.findByPk(copsId, { attributes: ['id', 'name', 'email'] });
+  if (!cops?.email) return;
+
+  // eslint-disable-next-line global-require
+  const { ownerContactFor, siteAddressOf } = require('../utils/ownerContact');
+  const owner = await ownerContactFor(exp);
+  const site = siteAddressOf(exp);
+  const qc = exp.qcReview || {};
+
+  const html = emailShell({
+    preheader: `${qcops?.name || 'QCOPS'} is on site for ${exp.name}`,
+    eyebrow: 'QCOPS is on site',
+    heading: escape(exp.name || 'Experience'),
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        Hi ${escape(cops.name || 'there')}, <strong>${escape(qcops?.name || 'your QCOPS')}</strong> has confirmed
+        they are at the location and the on-site quality check is underway.
+      </p>
+      <p style="color:#374151;line-height:1.6;margin:16px 0 6px;font-weight:700;">Who is on site</p>
+      ${kvTable([
+    ['QCOPS', escape(qcops?.name || '—')],
+    qcops?.employeeCode ? ['Employee code', escape(qcops.employeeCode)] : null,
+    qcops?.email ? ['Email', escape(qcops.email)] : null,
+    qcops?.phone ? ['Phone', escape(qcops.phone)] : null,
+    ['Confirmed at', escape(new Date().toLocaleString('en-IN'))],
+  ])}
+      <p style="color:#374151;line-height:1.6;margin:16px 0 6px;font-weight:700;">Where</p>
+      ${kvTable([
+    site ? ['Site address', escape(site)] : null,
+    exp.city ? ['City', escape(exp.city)] : null,
+    qc.visitDate ? ['Scheduled date', escape(qc.visitDate)] : null,
+    qc.visitTime ? ['Scheduled time', escape(qc.visitTime)] : null,
+  ])}
+      <p style="color:#374151;line-height:1.6;margin:16px 0 6px;font-weight:700;">Which experience</p>
+      ${kvTable([
+    ['Experience', escape(exp.name || '—')],
+    owner ? [owner.kind === 'host' ? 'Host' : 'Supplier', escape(owner.companyName || '—')] : null,
+    owner?.supplierName ? ['Contact person', escape(owner.supplierName)] : null,
+    owner?.phone ? ['Contact phone', escape(owner.phone)] : null,
+  ])}
+      ${ctaButton(`${TEAM_PORTAL_URL.replace('/login', '')}/review-queue`, 'Open the review queue')}
+    `,
+  });
+  const text = `${qcops?.name || 'QCOPS'} is on site for "${exp.name}"${site ? ` at ${site}` : ''}.`;
+  await mail({ to: cops.email, subject: `QCOPS is on site: "${exp.name}"`, html, text });
+};
+
 const notifyQcopsWentLive = async ({ exp }) => {
   if (!exp?.qcopsTeamMemberId) return;
   const m = await TeamMember.findByPk(exp.qcopsTeamMemberId, { attributes: ['id', 'name', 'email'] });
@@ -724,7 +784,7 @@ module.exports = {
   submitterContact,
   supplierContact,
   notifyCopsNewSubmission,
-  notifyAmAssigned, notifyAmAssignedHost, notifyHostOfManager,
+  notifyAmAssigned, notifyAmAssignedHost, notifyHostOfManager, notifyCopsQcOnsite,
   notifySupplierOfManager,
   notifySupplierStakeholdersOfExperience,
   notifySupplierStakeholdersOfDecision,

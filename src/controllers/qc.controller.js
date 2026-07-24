@@ -6,6 +6,7 @@ const {
 const { ok, fail } = require('../utils/response');
 const { validateQcFeedback, QC_FEEDBACK_FIELDS } = require('../utils/qcFeedback');
 const { istToInstant } = require('../utils/istTime');
+const { ownerContactFor } = require('../utils/ownerContact');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned, resolveUpResponder } = require('../services/accountManager.service');
@@ -64,7 +65,21 @@ const mine = asyncHandler(async (req, res) => {
     if (['qc_rejected', 'rejected'].includes(r.reviewStage)) stats.rejected += 1;
     if (r.status === 'published' && r.isActive) stats.live += 1;
   }
-  return ok(res, { items: rows.map((r) => r.toJSON()), fields: QC_FEEDBACK_FIELDS, stats });
+  /*
+    QCOPS's "View supplier details" panel reads item.supplier. That association
+    only exists for supplier-owned listings, so a HOST-submitted visit showed an
+    empty panel. Fill the same shape from the host's user record — the UI needs
+    no branching and QCOPS always has someone to coordinate with.
+  */
+  const items = await Promise.all(rows.map(async (r) => {
+    const j = r.toJSON();
+    if (!j.supplier) {
+      const owner = await ownerContactFor(r);
+      if (owner) j.supplier = owner;
+    }
+    return j;
+  }));
+  return ok(res, { items, fields: QC_FEEDBACK_FIELDS, stats });
 });
 
 const ownAssigned = async (req, id) => {
@@ -137,6 +152,10 @@ const onsite = asyncHandler(async (req, res) => {
   item.reviewStage = 'qc_onsite';
   await item.save();
   await notifyAssigner(item, { kind: 'qc_onsite', title: `QCOPS is on-site: "${item.name}"`, message: `${req.teamMember.name} confirmed they are at the location.` });
+  // Center Ops also gets a full email the moment QCOPS reports in — who is
+  // there, where, and for which experience.
+  reviewEmail.notifyCopsQcOnsite({ exp: item, qcops: req.teamMember })
+    .catch((err) => console.error('[qc] on-site email failed:', err.message));
   return ok(res, { item: item.toJSON() }, 'On-site confirmed');
 });
 
