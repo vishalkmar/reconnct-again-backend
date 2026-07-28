@@ -11,6 +11,7 @@ const {
 const { copsTab, COPS_TABS } = require('../utils/experienceStatus');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
+const cmService = require('../services/categoryManager.service');
 const { qcopsMemberWhere } = require('../models/teamMember.model');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('../services/accountManager.service');
 
@@ -322,6 +323,7 @@ const finalApprove = asyncHandler(async (req, res) => {
   reviewEmail.notifySubmitterDecision({ exp: item, kind: 'approved' })
     .catch((e) => console.error('[review-email] approved:', e.message));
   reviewEmail.notifySupplierStakeholdersOfDecision(item, 'approved').catch(() => {});
+  cmService.notifyCmOfExperience(item, { event: 'approved' }).catch(() => {});
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Content approved — send it for an on-site QCOPS check to go live');
@@ -408,6 +410,7 @@ const followUp = asyncHandler(async (req, res) => {
     extraRows: [['Round', String((item.reviewRound || 0) + 1)]],
   }).catch((e) => console.error('[review-email] objection:', e.message));
   // Copy the supplier's KAM + onboarding BD on a direct-onboarded listing.
+  cmService.notifyCmOfExperience(item, { event: 'objection', note: item.reviewNote }).catch(() => {});
   reviewEmail.notifySupplierStakeholdersOfDecision(item, 'objection', item.reviewNote)
     .catch(() => {});
 
@@ -443,6 +446,7 @@ const reject = asyncHandler(async (req, res) => {
   reviewEmail.notifySubmitterDecision({ exp: item, kind: 'rejected', note })
     .catch((e) => console.error('[review-email] rejected:', e.message));
   reviewEmail.notifySupplierStakeholdersOfDecision(item, 'rejected', note).catch(() => {});
+  cmService.notifyCmOfExperience(item, { event: 'rejected', note }).catch(() => {});
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Experience rejected');

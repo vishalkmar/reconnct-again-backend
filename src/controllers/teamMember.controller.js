@@ -5,6 +5,7 @@ const {
 } = require('../models/teamMember.model');
 const { ok, created, fail } = require('../utils/response');
 const { reassignOrphanedSuppliers, managerLoads, DEFAULT_MAX_SUPPLIERS } = require('../services/accountManager.service');
+const cmService = require('../services/categoryManager.service');
 
 // A KAM's supplier cap can never be set below this — 20 is the guaranteed
 // baseline. Lowering it once slots are full would orphan already-assigned
@@ -19,6 +20,7 @@ const PREFIX = {
   csm: 'CSM',
   qcops: 'QCOPS',
   marketing_manager: 'MKT',
+  category_manager: 'CM',
 };
 
 // e.g. "BD-0007" — counts existing members of that role and pads to 4
@@ -50,6 +52,20 @@ const list = asyncHandler(async (req, res) => {
   return ok(res, { members: members.map((m) => m.toSafeJSON()) });
 });
 
+// GET /api/admin/team/categories — the 10 broad categories with their current
+// Category-Manager owner. Drives the assignment form: any category owned by a
+// DIFFERENT manager is locked; free ones are assignable.
+const categories = asyncHandler(async (req, res) => {
+  const cats = await cmService.listCategoriesWithOwner();
+  // Also the CMs available as hand-off targets.
+  const cms = await TeamMember.findAll({
+    where: { roleType: 'category_manager', isActive: true },
+    attributes: ['id', 'name', 'email', 'employeeCode'],
+    order: [['name', 'ASC']],
+  });
+  return ok(res, { categories: cats, managers: cms.map((m) => m.toSafeJSON()) });
+});
+
 // GET /api/admin/team/kams — the KAM Accounts Management view: every active
 // Account Manager with how many suppliers they currently hold vs their cap,
 // plus a pool summary so the admin can see at a glance whether onboarding is
@@ -76,14 +92,16 @@ const kams = asyncHandler(async (req, res) => {
 const getOne = asyncHandler(async (req, res) => {
   const member = await TeamMember.findByPk(req.params.id);
   if (!member) return fail(res, 'Team member not found', 404);
-  return ok(res, { member: member.toSafeJSON() });
+  const out = member.toSafeJSON();
+  if (member.roleType === 'category_manager') out.categoryIds = await cmService.ownedCategoryIds(member.id);
+  return ok(res, { member: out });
 });
 
 // POST /api/admin/team  { name, email, password, roleType, permissions? }
 // `permissions` (partial) overrides the role's defaults per-key — lets the
 // admin uncheck/check anything even at creation time.
 const create = asyncHandler(async (req, res) => {
-  const { name, email, phone, roleType, permissions, maxSuppliers, alsoQcops } = req.body || {};
+  const { name, email, phone, roleType, permissions, maxSuppliers, alsoQcops, categoryIds } = req.body || {};
   if (!name || !email || !roleType) {
     return fail(res, 'name, email and roleType are required', 400);
   }
@@ -128,6 +146,13 @@ const create = asyncHandler(async (req, res) => {
     createdByAdminId: req.admin.id,
   });
 
+  // A Category Manager can be given broad categories to own right away. Each
+  // must be free (the form locks any owned by someone else); validated here too.
+  if (roleType === 'category_manager' && Array.isArray(categoryIds) && categoryIds.length) {
+    const r = await cmService.applyAssignment(member.id, categoryIds, {});
+    if (r.error) { await member.destroy(); return fail(res, r.error, 400); }
+  }
+
   // Non-blocking, and the only copy of the password — log a failure loudly.
   sendTeamWelcome({ member, password })
     .catch((err) => console.error('[team] welcome email failed:', err.message));
@@ -141,7 +166,7 @@ const update = asyncHandler(async (req, res) => {
   const member = await TeamMember.findByPk(req.params.id);
   if (!member) return fail(res, 'Team member not found', 404);
 
-  const { name, phone, permissions, isActive, password, maxSuppliers, alsoQcops } = req.body || {};
+  const { name, phone, permissions, isActive, password, maxSuppliers, alsoQcops, categoryIds, handoffs } = req.body || {};
   if (name !== undefined) member.name = String(name).trim();
   // Toggle the extra QCOPS dashboard on/off later — only meaningful for a COPS.
   if (alsoQcops !== undefined && member.roleType === 'cops') member.alsoQcops = !!alsoQcops;
@@ -160,6 +185,12 @@ const update = asyncHandler(async (req, res) => {
       return fail(res, `Max suppliers can’t be below ${MIN_MAX_SUPPLIERS}`, 400);
     }
     member.maxSuppliers = cap;
+  }
+  // Category Manager re-assignment: add free categories, hand off removed ones
+  // to another CM (a category is never left ownerless once it has had a manager).
+  if (member.roleType === 'category_manager' && categoryIds !== undefined) {
+    const r = await cmService.applyAssignment(member.id, categoryIds, handoffs || {});
+    if (r.error) return fail(res, r.error, 400);
   }
   const wasActive = member.isActive;
   if (isActive !== undefined) member.isActive = !!isActive;
@@ -188,5 +219,5 @@ const remove = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  meta, list, kams, getOne, create, update, remove,
+  meta, list, kams, categories, getOne, create, update, remove,
 };

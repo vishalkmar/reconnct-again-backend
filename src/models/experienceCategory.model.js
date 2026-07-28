@@ -20,6 +20,9 @@ const ExperienceCategory = sequelize.define(
     // for every audience (so legacy categories keep working). Drives the admin
     // form's "select audience → filter categories" behaviour.
     audiences: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+    // The Category Manager who owns this broad category. A category has at most
+    // ONE CM at a time; their dashboard is scoped to it. Null = unassigned.
+    categoryManagerId: { type: DataTypes.INTEGER, allowNull: true },
     isCustom: { type: DataTypes.BOOLEAN, defaultValue: false },
     sortOrder: { type: DataTypes.INTEGER, defaultValue: 0 },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },

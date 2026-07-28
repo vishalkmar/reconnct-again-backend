@@ -105,6 +105,8 @@ const migrate = async () => {
   await addColumnIfMissing('team_members', 'phone', 'VARCHAR(20) NULL', changes);
   // A COPS may also work the QCOPS queue (dual dashboard).
   await addColumnIfMissing('team_members', 'alsoQcops', 'TINYINT(1) NOT NULL DEFAULT 0', changes);
+  // Category Manager ownership lives on the category row.
+  await addColumnIfMissing('experience_categories', 'categoryManagerId', 'INT NULL', changes);
   await ensureMaxSuppliersBaseline20(changes);
   await ensureStatusEnumHasPendingReview(changes);
   return { changes };

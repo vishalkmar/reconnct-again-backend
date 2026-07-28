@@ -9,6 +9,7 @@ const { istToInstant } = require('../utils/istTime');
 const { ownerContactFor } = require('../utils/ownerContact');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
+const cmService = require('../services/categoryManager.service');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned, resolveUpResponder } = require('../services/accountManager.service');
 
 let mailer = null;
@@ -248,6 +249,7 @@ const publishLive = async (item, copsId) => {
   if (item.ownerUserId) ensureHostAccountManagerAssigned(item.ownerUserId).catch(() => {});
   // The KAM (supplier or host) hears that one of their accounts just went live.
   reviewEmail.notifySupplierStakeholdersOfDecision(item, 'live').catch(() => {});
+  cmService.notifyCmOfExperience(item, { event: 'live' }).catch(() => {});
   // Ping the QCOPS who checked it, so their board moves it to Approved/Live.
   if (item.qcopsTeamMemberId) {
     reviewNotify.notify({ recipientType: 'team', recipientId: item.qcopsTeamMemberId, experienceId: item.id, kind: 'approved', title: `"${item.name}" is now live`, message: 'The listing you checked went live.' }).catch(() => {});
@@ -328,6 +330,7 @@ const upReject = asyncHandler(async (req, res) => {
   }).catch(() => {});
   reviewEmail.notifySubmitterDecision({ exp: item, kind: 'rejected', note: reason }).catch(() => {});
   reviewEmail.notifySupplierStakeholdersOfDecision(item, 'rejected', reason).catch(() => {});
+  cmService.notifyCmOfExperience(item, { event: 'rejected', note: reason }).catch(() => {});
   // Ping the QCOPS who checked it → their board moves it to Rejected.
   if (item.qcopsTeamMemberId) {
     reviewNotify.notify({ recipientType: 'team', recipientId: item.qcopsTeamMemberId, experienceId: item.id, kind: 'rejected', title: `"${item.name}" was rejected`, message: reason }).catch(() => {});
@@ -352,6 +355,7 @@ const delist = asyncHandler(async (req, res) => {
   item.reviewStage = 'delisted';
   // KAM of whoever owns it hears about the delisting.
   reviewEmail.notifySupplierStakeholdersOfDecision(item, 'delisted', req.body?.reason).catch(() => {});
+  cmService.notifyCmOfExperience(item, { event: 'delisted', note: req.body?.reason }).catch(() => {});
   item.data = { ...(item.data || {}), delistReason: reason, delistedAt: new Date().toISOString(), hostStatus: 'draft' };
   await item.save();
 

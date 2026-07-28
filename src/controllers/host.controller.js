@@ -13,6 +13,7 @@ const {
 } = require('../utils/reviewSections');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
+const cmService = require('../services/categoryManager.service');
 const { validateImagesForSubmit } = require('../utils/experienceValidation');
 const { submitterTab } = require('../utils/experienceStatus');
 
@@ -394,6 +395,7 @@ const createMine = asyncHandler(async (req, res) => {
       .catch((e) => console.error('[review-email] new submission:', e.message));
     // A supplier adding their OWN experience → also tell their KAM + onboarding
     // BD (email + in-app), so the people who look after them see it early.
+    cmService.notifyCmOfExperience(row, { event: 'submitted' }).catch(() => {});
     reviewEmail.notifySupplierStakeholdersOfExperience(row)
       .catch((e) => console.error('[review-email] supplier stakeholders:', e.message));
   }

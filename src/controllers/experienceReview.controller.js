@@ -5,6 +5,7 @@ const {
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { recomputeStats } = require('./review.controller');
+const cmService = require('../services/categoryManager.service');
 const { isCompleted } = require('../utils/bookingLifecycle');
 
 /*
@@ -102,6 +103,12 @@ const submitForBooking = asyncHandler(async (req, res) => {
   });
 
   await recomputeStats('experience', booking.itemId);
+
+  // Tell the Category Manager(s) who own this listing's categories.
+  try {
+    const exp = await Experience.findByPk(booking.itemId, { attributes: ['id', 'name', 'categoryIds'] });
+    if (exp) cmService.notifyCmOfExperience(exp.toJSON(), { event: 'review', rating: stars, note: comment ? String(comment).slice(0, 200) : null }).catch(() => {});
+  } catch { /* best effort */ }
 
   return created(res, { review }, 'Thanks for rating your experience!');
 });

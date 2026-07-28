@@ -3,8 +3,15 @@ const { fromPaise } = require('./booking.service');
 const { buildBookingVoucherPdf } = require('./bookingVoucherPdf.service');
 const { sendPushToUser, sendPushToSupplier } = require('./push.service');
 const {
-  escapeHtml: escape, emailShell, kvTable, calloutBox,
+  escapeHtml: escape, emailShell, kvTable, calloutBox, ctaButton,
 } = require('../utils/emailLayout');
+
+// Where a guest actually leaves their rating: the member dashboard auto-opens
+// the rating popup for a completed booking (see UserDashboardHomePage +
+// /bookings/me/pending-review). The ?review=<code> makes it deterministic.
+const PUBLIC_WEB_URL = process.env.PUBLIC_WEB_URL || 'https://reconnct-again-frontend.vercel.app';
+const APP_URL = process.env.APP_DOWNLOAD_URL || 'https://reconnct.app/app';
+const reviewLink = (booking) => `${PUBLIC_WEB_URL}/dashboard?review=${encodeURIComponent(booking.bookingCode || '')}`;
 
 const fmtMoney = (paise, currency = 'INR') => {
   const value = fromPaise(paise);
@@ -223,7 +230,7 @@ const notifyHostOfBooking = async ({ booking }) => {
 
 // Shared little reminder card (guest or host wording swapped by the caller).
 const buildReminderHtml = ({
-  heading, lead, itemName, itemImage, itemLocation, scheduleLine, extraRows = [],
+  heading, lead, itemName, itemImage, itemLocation, scheduleLine, extraRows = [], ctas = [],
 }) => emailShell({
   preheader: lead.replace(/<[^>]+>/g, ''),
   eyebrow: heading,
@@ -236,6 +243,7 @@ const buildReminderHtml = ({
       itemLocation ? ['Location', escape(itemLocation)] : null,
       ...extraRows,
     ])}
+    ${ctas.map((c) => ctaButton(c.href, c.label)).join('')}
   `,
 });
 
@@ -285,8 +293,14 @@ const sendExperienceCompleted = async ({ booking }) => {
     itemLocation: item.location,
     scheduleLine: scheduleLineFor(booking),
     extraRows: [['Guests', String(booking.guestCount || 1)]],
+    ctas: [
+      { href: reviewLink(booking), label: '⭐ Rate your experience' },
+      { href: APP_URL, label: 'Or rate it in the app' },
+    ],
   });
-  const text = `Thanks for coming along! We hope ${name} was great. Rate your experience in the reconnct app — booking ${booking.bookingCode}.`;
+  const text = `Thanks for coming along! We hope ${name} was great.
+Rate your experience: ${reviewLink(booking)}
+Or open the reconnct app. Booking ${booking.bookingCode}.`;
   return send({ to: booking.guestEmail, subject, html, text });
 };
 

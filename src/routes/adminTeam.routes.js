@@ -8,6 +8,7 @@ router.use(authenticate);
 
 router.get('/meta', c.meta);
 router.get('/kams', c.kams);
+router.get('/categories', c.categories);
 router.get('/', c.list);
 router.get('/:id', c.getOne);
 router.post('/', c.create);

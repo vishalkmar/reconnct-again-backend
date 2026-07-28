@@ -735,6 +735,44 @@ const notifyCopsQcOnsite = async ({ exp, qcops }) => {
   await mail({ to: cops.email, subject: `QCOPS is on site: "${exp.name}"`, html, text });
 };
 
+/*
+  Category Manager alerts — one template for every event on a listing in a
+  category they own. Keeps them in the loop end-to-end: a new listing arrives,
+  moves through review, goes live, gets delisted, or picks up a review.
+*/
+const CM_EVENT = {
+  submitted: { eyebrow: 'New listing in your category', line: 'A new listing has entered your category and started the review process.' },
+  objection: { eyebrow: 'Objection raised', line: 'Center Ops raised an objection on a listing in your category.' },
+  approved: { eyebrow: 'Content approved', line: 'A listing in your category passed content review.' },
+  rejected: { eyebrow: 'Listing rejected', line: 'A listing in your category was not approved.' },
+  live: { eyebrow: 'Now live', line: 'A listing in your category is now live on the platform.' },
+  delisted: { eyebrow: 'Delisted', line: 'A listing in your category was delisted from the platform.' },
+  review: { eyebrow: 'New review', line: 'A guest left a new review on a listing in your category.' },
+};
+const notifyCategoryManagerEvent = async ({ manager, exp, event, note, rating, categoryName }) => {
+  if (!manager?.email) return;
+  const meta = CM_EVENT[event] || { eyebrow: 'Update', line: 'There is an update on a listing in your category.' };
+  const html = emailShell({
+    preheader: `${exp.name} — ${meta.eyebrow}`,
+    eyebrow: meta.eyebrow,
+    heading: escape(exp.name || 'Experience'),
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        Hi ${escape(manager.name || 'there')}, ${meta.line}
+      </p>
+      ${kvTable([
+    ['Listing', escape(exp.name || '—')],
+    ['Category', escape(categoryName || '—')],
+    rating ? ['Rating', `${'★'.repeat(Number(rating) || 0)} (${rating}/5)`] : null,
+    note ? ['Note', escape(note)] : null,
+  ])}
+      ${ctaButton(`${TEAM_PORTAL_URL.replace('/login', '')}/category/status`, 'Open your Category dashboard')}
+    `,
+  });
+  const text = `${meta.eyebrow}: ${exp.name} (${categoryName || ''}).${note ? ` ${note}` : ''}`;
+  await mail({ to: manager.email, subject: `${meta.eyebrow}: "${exp.name}"`, html, text });
+};
+
 const notifyQcopsWentLive = async ({ exp }) => {
   if (!exp?.qcopsTeamMemberId) return;
   const m = await TeamMember.findByPk(exp.qcopsTeamMemberId, { attributes: ['id', 'name', 'email'] });
@@ -784,7 +822,7 @@ module.exports = {
   submitterContact,
   supplierContact,
   notifyCopsNewSubmission,
-  notifyAmAssigned, notifyAmAssignedHost, notifyHostOfManager, notifyCopsQcOnsite,
+  notifyAmAssigned, notifyAmAssignedHost, notifyHostOfManager, notifyCopsQcOnsite, notifyCategoryManagerEvent,
   notifySupplierOfManager,
   notifySupplierStakeholdersOfExperience,
   notifySupplierStakeholdersOfDecision,

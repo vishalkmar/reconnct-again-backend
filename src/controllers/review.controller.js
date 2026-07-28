@@ -102,6 +102,13 @@ const submit = asyncHandler(async (req, res) => {
     comment: comment || null,
     isApproved: false,
   });
+  if (entityType === 'experience') {
+    try {
+      const { Experience } = require('../models'); // eslint-disable-line global-require
+      const exp = await Experience.findByPk(entityId, { attributes: ['id', 'name', 'categoryIds'] });
+      if (exp) cmService.notifyCmOfExperience(exp.toJSON(), { event: 'review', rating, note: comment ? String(comment).slice(0, 200) : null }).catch(() => {});
+    } catch { /* best effort */ }
+  }
   return created(res, { review }, 'Review submitted — pending approval');
 });
 

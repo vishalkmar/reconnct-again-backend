@@ -9,7 +9,7 @@ const { sequelize } = require('../config/database');
 // robin assignment) all gate on `permissions`. Separate from the Admin model
 // entirely so existing admin role checks (`authorize('superadmin', ...)`)
 // are never affected by this.
-const ROLE_TYPES = ['bd', 'cops', 'account_manager', 'csm', 'qcops', 'marketing_manager'];
+const ROLE_TYPES = ['bd', 'cops', 'account_manager', 'csm', 'qcops', 'marketing_manager', 'category_manager'];
 
 const ROLE_LABELS = {
   bd: 'Business Developer',
@@ -18,6 +18,7 @@ const ROLE_LABELS = {
   csm: 'Customer Success Manager',
   qcops: 'Quality Check Operations',
   marketing_manager: 'Marketing Manager',
+  category_manager: 'Category Manager',
 };
 
 // Every capability toggle the admin can flip for a team member, and which
@@ -58,6 +59,13 @@ const ROLE_DEFAULT_PERMISSIONS = {
     canCreateSupplier: false, canAddExperience: false, canReviewListings: true, canAssignQCOPS: false, canManageAccounts: false, canManageCustomers: false,
   },
   marketing_manager: {
+    canCreateSupplier: false, canAddExperience: false, canReviewListings: false, canAssignQCOPS: false, canManageAccounts: false, canManageCustomers: false,
+  },
+  // A Category Manager owns one or more of the 10 broad categories (ownership
+  // lives on the category row — ExperienceCategory.categoryManagerId). Their
+  // whole dashboard is scoped to experiences in those categories, so no
+  // permission toggle gates it.
+  category_manager: {
     canCreateSupplier: false, canAddExperience: false, canReviewListings: false, canAssignQCOPS: false, canManageAccounts: false, canManageCustomers: false,
   },
 };
