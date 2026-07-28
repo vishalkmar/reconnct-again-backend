@@ -83,7 +83,7 @@ const getOne = asyncHandler(async (req, res) => {
 // `permissions` (partial) overrides the role's defaults per-key — lets the
 // admin uncheck/check anything even at creation time.
 const create = asyncHandler(async (req, res) => {
-  const { name, email, phone, roleType, permissions, maxSuppliers } = req.body || {};
+  const { name, email, phone, roleType, permissions, maxSuppliers, alsoQcops } = req.body || {};
   if (!name || !email || !roleType) {
     return fail(res, 'name, email and roleType are required', 400);
   }
@@ -118,6 +118,8 @@ const create = asyncHandler(async (req, res) => {
     name: String(name).trim(),
     email: emailNorm,
     phone: phone ? String(phone).trim() : null,
+    // A dual QCOPS dashboard only makes sense for a Center Ops member.
+    alsoQcops: roleType === 'cops' ? !!alsoQcops : false,
     employeeCode,
     password,
     roleType,
@@ -139,8 +141,10 @@ const update = asyncHandler(async (req, res) => {
   const member = await TeamMember.findByPk(req.params.id);
   if (!member) return fail(res, 'Team member not found', 404);
 
-  const { name, phone, permissions, isActive, password, maxSuppliers } = req.body || {};
+  const { name, phone, permissions, isActive, password, maxSuppliers, alsoQcops } = req.body || {};
   if (name !== undefined) member.name = String(name).trim();
+  // Toggle the extra QCOPS dashboard on/off later — only meaningful for a COPS.
+  if (alsoQcops !== undefined && member.roleType === 'cops') member.alsoQcops = !!alsoQcops;
   if (phone !== undefined) {
     const next = String(phone || '').trim();
     // Same rule on edit — a KAM must never end up without a reachable number.

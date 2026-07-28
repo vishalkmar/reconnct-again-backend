@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { TeamMember } = require('../models');
+const { availableRolesFor } = require('../models/teamMember.model');
 
 // Third parallel to authenticate (admin) / authenticateUser (user) —
 // internal staff accounts (BD/COPS/Account Manager/CSM/QCOPS/Marketing).
@@ -23,6 +24,13 @@ const authenticateTeamMember = async (req, res, next) => {
     }
 
     req.teamMember = member;
+    // The dashboard this session is acting as. From the JWT, but only honoured
+    // if the member is genuinely entitled to it — otherwise it falls back to
+    // their primary role, so a tampered token can never grant a role they lack.
+    const roles = availableRolesFor(member);
+    const wanted = decoded.activeRole;
+    req.activeRole = (wanted && roles.includes(wanted)) ? wanted : member.roleType;
+    req.teamMemberRoles = roles;
     next();
   } catch {
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });

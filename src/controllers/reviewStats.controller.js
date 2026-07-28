@@ -174,7 +174,7 @@ const queue = asyncHandler(async (req, res) => {
       { status: 'draft', supplierId: { [Op.ne]: null }, createdByTeamMemberId: null },
     ],
   };
-  const isQcops = req.teamMember && req.teamMember.roleType === 'qcops';
+  const isQcops = req.activeRole === 'qcops';
   if (isQcops) where.qcopsTeamMemberId = req.teamMember.id;
 
   const candidates = await Experience.findAll({ where, attributes: CARD_ATTRS, order: [['updatedAt', 'DESC']] });

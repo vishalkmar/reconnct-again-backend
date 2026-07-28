@@ -11,6 +11,7 @@ const {
 const { copsTab, COPS_TABS } = require('../utils/experienceStatus');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
+const { qcopsMemberWhere } = require('../models/teamMember.model');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('../services/accountManager.service');
 
 const INCLUDE = [
@@ -123,7 +124,7 @@ const list = asyncHandler(async (req, res) => {
       { status: 'draft', supplierId: { [Op.ne]: null }, createdByTeamMemberId: null },
     ],
   };
-  if (req.teamMember && req.teamMember.roleType === 'qcops') {
+  if (req.activeRole === 'qcops') {
     where.qcopsTeamMemberId = req.teamMember.id;
   }
   const candidates = await Experience.findAll({
@@ -141,7 +142,7 @@ const list = asyncHandler(async (req, res) => {
 // only sees items escalated to them.
 const board = asyncHandler(async (req, res) => {
   const where = {};
-  if (req.teamMember && req.teamMember.roleType === 'qcops') where.qcopsTeamMemberId = req.teamMember.id;
+  if (req.activeRole === 'qcops') where.qcopsTeamMemberId = req.teamMember.id;
   const rows = await Experience.findAll({ where, include: INCLUDE, order: [['updatedAt', 'DESC']] });
   // Skip plain drafts that never entered review (admin scratch drafts).
   const inPipeline = rows.filter((r) => r.status !== 'draft' || r.reviewStage || (r.data && r.data.hostStatus === 'pending'));
@@ -156,7 +157,7 @@ const board = asyncHandler(async (req, res) => {
 // "Assign to QCOPS" picker.
 const qcopsOptions = asyncHandler(async (req, res) => {
   const rows = await TeamMember.findAll({
-    where: { roleType: 'qcops', isActive: true },
+    where: qcopsMemberWhere({ isActive: true }),
     attributes: ['id', 'name', 'employeeCode'],
     order: [['name', 'ASC']],
   });
@@ -474,7 +475,7 @@ const requestChanges = asyncHandler(async (req, res) => {
 // Manager service's self-correcting approach — picks whichever QCOPS currently
 // holds the fewest assigned experiences).
 const pickLeastLoadedQcops = async () => {
-  const qcops = await TeamMember.findAll({ where: { roleType: 'qcops', isActive: true }, attributes: ['id', 'name', 'employeeCode'] });
+  const qcops = await TeamMember.findAll({ where: qcopsMemberWhere({ isActive: true }), attributes: ['id', 'name', 'employeeCode'] });
   if (qcops.length === 0) return null;
   const counts = await Promise.all(
     qcops.map((q) => Experience.count({ where: { qcopsTeamMemberId: q.id } })),
@@ -557,7 +558,7 @@ const assignQcops = asyncHandler(async (req, res) => {
     await item.save();
     return ok(res, {}, 'Unassigned');
   }
-  const qcops = await TeamMember.findOne({ where: { id: qcopsTeamMemberId, roleType: 'qcops', isActive: true } });
+  const qcops = await TeamMember.findOne({ where: qcopsMemberWhere({ id: qcopsTeamMemberId, isActive: true }) });
   if (!qcops) return fail(res, 'That QCOPS account was not found', 400);
 
   item.qcopsTeamMemberId = qcops.id;

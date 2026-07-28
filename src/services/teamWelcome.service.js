@@ -35,6 +35,7 @@ const sendTeamWelcome = async ({ member, password }) => {
     ['Role', escape(roleLabel)],
     member.employeeCode ? ['Employee code', escape(member.employeeCode)] : null,
   ])}
+      ${member.alsoQcops && member.roleType === 'cops' ? calloutBox('Two dashboards', 'You also have <strong>QCOPS</strong> access. When you sign in, you will choose which dashboard to open — Center Operations or Quality Check Operations.') : ''}
       ${ctaButton(TEAM_PORTAL_URL, 'Open the Team Portal')}
       <p style="color:#6B7280;line-height:1.6;font-size:12px;margin:20px 0 0;">
         Keep this email safe — it's the only place your password is shown. If you didn't expect this,

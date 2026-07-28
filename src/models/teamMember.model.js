@@ -87,6 +87,11 @@ const TeamMember = sequelize.define(
     // once every KAM is at their cap (admin raises it or adds a KAM). Ignored
     // for non-KAM roles.
     maxSuppliers: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 20 },
+    // Center Ops members are few, so a COPS may ALSO work the QCOPS queue. When
+    // true (and the primary role is cops) this member can enter EITHER the COPS
+    // or the QCOPS dashboard — they pick which at login. Ignored for any other
+    // role. See availableRolesFor / qcopsMemberWhere below.
+    alsoQcops: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
     createdByAdminId: { type: DataTypes.INTEGER, allowNull: true },
@@ -118,7 +123,26 @@ TeamMember.prototype.toSafeJSON = function () {
   return obj;
 };
 
+// Every dashboard this member may enter. Primary role always; QCOPS as well
+// when a COPS has been granted the extra department.
+const availableRolesFor = (m) => {
+  const roles = [m.roleType];
+  if (m.roleType === 'cops' && m.alsoQcops) roles.push('qcops');
+  return roles;
+};
+
+// WHERE that matches anyone who can act as QCOPS — a real qcops, OR a cops with
+// the extra department. Used by every "pick a QCOPS" query so a dual-role COPS
+// is assignable too. Caller can spread more conditions (e.g. isActive) in.
+const { Op } = require('sequelize');
+const qcopsMemberWhere = (extra = {}) => ({
+  ...extra,
+  [Op.or]: [{ roleType: 'qcops' }, { roleType: 'cops', alsoQcops: true }],
+});
+
 module.exports = TeamMember;
+module.exports.availableRolesFor = availableRolesFor;
+module.exports.qcopsMemberWhere = qcopsMemberWhere;
 module.exports.ROLE_TYPES = ROLE_TYPES;
 module.exports.ROLE_LABELS = ROLE_LABELS;
 module.exports.PERMISSION_KEYS = PERMISSION_KEYS;

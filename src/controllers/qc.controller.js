@@ -382,7 +382,7 @@ const perQcopsStats = async (qcopsId) => {
 
 // GET /api/team/qc/management — every QCOPS with a stats summary.
 const management = asyncHandler(async (req, res) => {
-  const qcops = await TeamMember.findAll({ where: { roleType: 'qcops' }, attributes: ['id', 'name', 'email', 'employeeCode', 'isActive'], order: [['name', 'ASC']] });
+  const qcops = await TeamMember.findAll({ where: qcopsMemberWhere(), attributes: ['id', 'name', 'email', 'employeeCode', 'isActive'], order: [['name', 'ASC']] });
   const items = await Promise.all(qcops.map(async (q) => {
     const { stats } = await perQcopsStats(q.id);
     return { id: q.id, name: q.name, email: q.email, employeeCode: q.employeeCode, isActive: q.isActive, stats };
@@ -392,7 +392,7 @@ const management = asyncHandler(async (req, res) => {
 
 // GET /api/team/qc/management/:qcopsId — one QCOPS's detailed analytics.
 const managementDetail = asyncHandler(async (req, res) => {
-  const q = await TeamMember.findOne({ where: { id: req.params.qcopsId, roleType: 'qcops' }, attributes: ['id', 'name', 'email', 'employeeCode', 'isActive'] });
+  const q = await TeamMember.findOne({ where: qcopsMemberWhere({ id: req.params.qcopsId }), attributes: ['id', 'name', 'email', 'employeeCode', 'isActive'] });
   if (!q) return fail(res, 'QCOPS member not found', 404);
   const { stats, rows } = await perQcopsStats(q.id);
   // Hydrate names/images for the listing table.
