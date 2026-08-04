@@ -123,6 +123,7 @@ const locate = asyncHandler(async (req, res) => {
     country: country || null,
     area: area || null,
     postcode: postcode || null,
+    pincode: postcode || null,
     fullAddress: fullAddress || [area, city, region, country].filter(Boolean).join(', ') || null,
     lat: lat != null ? Number(lat) : null,
     lon: lon != null ? Number(lon) : null,
@@ -187,7 +188,20 @@ const CITY_IMAGE = {
   manali: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=800&q=80',
 };
 
-// Look up a real lead photo for a place from Wikipedia (free, no key).
+// Generic hero image used only when we truly can't find anything else — the
+// "You are here" card must NEVER be blank.
+const GENERIC_IMAGE = 'https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=800&q=80';
+
+// Bump a Wikipedia thumbnail URL up to ~800px wide. Wikimedia thumb URLs end in
+// "/<n>px-Name.jpg" — swapping the size gives a bigger yet still light image
+// (the full originalimage can be several MB and often fails to load on mobile).
+const upsizeWikiThumb = (url) => {
+  if (!url) return url;
+  return url.replace(/\/(\d+)px-/, '/800px-');
+};
+
+// Look up a real lead photo for a place from Wikipedia (free, no key). Prefers
+// a right-sized thumbnail (reliable on mobile) over the heavy originalimage.
 const wikiSummary = async (title) => {
   if (!title) return null;
   const j = await safeFetch(
@@ -195,7 +209,8 @@ const wikiSummary = async (title) => {
     { headers: { 'User-Agent': 'reconnct-app/1.0 (support@reconnct.app)' } },
   );
   if (!j || j.type === 'disambiguation') return null;
-  const img = (j.originalimage && j.originalimage.source) || (j.thumbnail && j.thumbnail.source) || null;
+  const img = (j.thumbnail && upsizeWikiThumb(j.thumbnail.source))
+    || (j.originalimage && j.originalimage.source) || null;
   if (!img) return null;
   return { name: j.title || title, image: img, blurb: j.extract || '', link: (j.content_urls && j.content_urls.desktop && j.content_urls.desktop.page) || null };
 };
@@ -248,15 +263,16 @@ const placeImage = asyncHandler(async (req, res) => {
     const hit = await wikiSummary(title);
     if (hit) return ok(res, { ...hit, city: city || null, area: area || null, source: 'wikipedia' });
   }
-  const fallback = CITY_IMAGE[city.toLowerCase()];
+  // Image is mandatory for the "You are here" card — never return null.
+  const fallback = CITY_IMAGE[city.toLowerCase()] || GENERIC_IMAGE;
   return ok(res, {
     name: landmark || area || city || 'Near you',
-    image: fallback || null,
+    image: fallback,
     blurb: '',
     link: null,
     city: city || null,
     area: area || null,
-    source: fallback ? 'curated' : 'none',
+    source: CITY_IMAGE[city.toLowerCase()] ? 'curated' : 'generic',
   });
 });
 

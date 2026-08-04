@@ -292,10 +292,19 @@ const runBackgroundDbWork = async () => {
   }
 
   // Geocode any experiences still missing lat/long so "experiences near you"
-  // and the distance bands work. Idempotent + throttled + fire-and-forget: it
-  // never delays boot, on the FIRST deploy it fills every existing listing, and
-  // on later boots it finds nothing to do. New listings are geocoded on save.
+  // works. Idempotent + throttled + fire-and-forget: it never delays boot, on
+  // the FIRST deploy it fills every existing listing, and on later boots it
+  // finds nothing to do. New listings are geocoded on save. Runs AFTER the
+  // optional Delhi test-data seed so any rows it nulls get re-geocoded here.
   (async () => {
+    try {
+      // Optional (SEED_DELHI_TEST=1) — spread demo rows across Delhi for testing.
+      const { seed: seedDelhiTestLocations } = require('./scripts/seedDelhiTestLocations');
+      const s = await seedDelhiTestLocations();
+      if (s.assigned) console.log(`[geo] Delhi test-data seed: reshaped ${s.assigned}/${s.total} experience(s)`);
+    } catch (err) {
+      console.warn('[geo] Delhi test-data seed failed (non-fatal):', err.message);
+    }
     try {
       const { backfillExperienceCoords } = require('./scripts/backfillExperienceCoords');
       const r = await backfillExperienceCoords({ log: () => {} });
