@@ -1,4 +1,5 @@
 const asyncHandler = require('express-async-handler');
+const { geocodeExperienceById } = require('../services/geocode.service');
 const slugify = require('slugify');
 const { Op } = require('sequelize');
 const {
@@ -16,7 +17,7 @@ const { validateImagesForSubmit } = require('../utils/experienceValidation');
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
 const WRITABLE = [
-  'name', 'audiences', 'categoryIds', 'typeIds', 'supplierId', 'showSupplierPublic', 'location', 'city', 'nearbyLocation', 'latitude', 'longitude',
+  'name', 'audiences', 'categoryIds', 'typeIds', 'supplierId', 'showSupplierPublic', 'location', 'city', 'pincode', 'nearbyLocation', 'latitude', 'longitude',
   'rating', 'about', 'mainImage', 'gallery', 'videos', 'mode', 'status',
   'priceMethod', 'pricing', 'currency', 'gstRate', 'discount', 'convenienceFee',
   'termsConditions', 'privacyPolicy', 'refundCancellationPolicy',
@@ -166,6 +167,7 @@ const create = asyncHandler(async (req, res) => {
     data.status = 'pending_review';
   }
   const item = await Experience.create(data);
+  geocodeExperienceById(item.id, { force: true }).catch(() => {});
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
   // A host owns their listings directly — they get a KAM from the same pool
   // the first time one of those listings goes live.
@@ -203,6 +205,9 @@ const update = asyncHandler(async (req, res) => {
     data.slug = await uniqueSlug(req.body.slug, item.id);
   }
   await item.update(data);
+  if (data.location != null || data.city != null || data.pincode != null || data.nearbyLocation != null) {
+    geocodeExperienceById(item.id, { force: true }).catch(() => {});
+  }
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: await withAudiences(full) }, 'Experience updated');
 });
@@ -217,6 +222,7 @@ const duplicate = asyncHandler(async (req, res) => {
   j.slug = await uniqueSlug(j.name);
   j.status = 'draft';
   const copy = await Experience.create(j);
+  geocodeExperienceById(copy.id, { force: true }).catch(() => {});
   const full = await Experience.findByPk(copy.id, { include: INCLUDE });
   return created(res, { item: await withAudiences(full) }, 'Experience duplicated');
 });

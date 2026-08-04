@@ -171,4 +171,57 @@ const nearby = asyncHandler(async (req, res) => {
   return ok(res, { city, source: 'static', places: STATIC_NEARBY(city) });
 });
 
-module.exports = { locate, nearby, coordsForCity, haversineKm, CITY_COORDS };
+// Curated hero fallbacks per city so "You are here" always has a nice photo
+// even when Wikipedia has no lead image for the resolved place.
+const CITY_IMAGE = {
+  delhi: 'https://images.unsplash.com/photo-1587474260584-136574528ed5?w=800&q=80',
+  mumbai: 'https://images.unsplash.com/photo-1529253355930-ddbe423a2ac7?w=800&q=80',
+  jaipur: 'https://images.unsplash.com/photo-1477587458883-47145ed94245?w=800&q=80',
+  goa: 'https://images.unsplash.com/photo-1512343879784-a960bf40e7f2?w=800&q=80',
+  rishikesh: 'https://images.unsplash.com/photo-1591017403286-fd8493524e1e?w=800&q=80',
+  bengaluru: 'https://images.unsplash.com/photo-1596176530529-78163a4f7af2?w=800&q=80',
+  bangalore: 'https://images.unsplash.com/photo-1596176530529-78163a4f7af2?w=800&q=80',
+  udaipur: 'https://images.unsplash.com/photo-1609766418204-94aae0ecf4e5?w=800&q=80',
+  varanasi: 'https://images.unsplash.com/photo-1561361513-2d000a50f0dc?w=800&q=80',
+  kolkata: 'https://images.unsplash.com/photo-1558431382-27e303142255?w=800&q=80',
+  manali: 'https://images.unsplash.com/photo-1626621341517-bbf3d9990a23?w=800&q=80',
+};
+
+// Look up a real lead photo for a place from Wikipedia (free, no key).
+const wikiSummary = async (title) => {
+  if (!title) return null;
+  const j = await safeFetch(
+    `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`,
+    { headers: { 'User-Agent': 'reconnct-app/1.0 (support@reconnct.app)' } },
+  );
+  if (!j || j.type === 'disambiguation') return null;
+  const img = (j.originalimage && j.originalimage.source) || (j.thumbnail && j.thumbnail.source) || null;
+  if (!img) return null;
+  return { name: j.title || title, image: img, blurb: j.extract || '', link: (j.content_urls && j.content_urls.desktop && j.content_urls.desktop.page) || null };
+};
+
+// GET /api/public/geo/place-image?city=&place=
+// A single "You are here" hero: a famous place near the user + its real photo.
+// Tries the specific landmark first, then the city, then a curated fallback.
+const placeImage = asyncHandler(async (req, res) => {
+  const city = String(req.query.city || '').trim();
+  const place = String(req.query.place || '').trim();
+  for (const title of [place, place && city ? `${place}, ${city}` : '', city].filter(Boolean)) {
+    // eslint-disable-next-line no-await-in-loop
+    const hit = await wikiSummary(title);
+    if (hit) return ok(res, { ...hit, city: city || null, source: 'wikipedia' });
+  }
+  const fallback = CITY_IMAGE[city.toLowerCase()];
+  return ok(res, {
+    name: place || city || 'Near you',
+    image: fallback || null,
+    blurb: '',
+    link: null,
+    city: city || null,
+    source: fallback ? 'curated' : 'none',
+  });
+});
+
+module.exports = {
+  locate, nearby, placeImage, coordsForCity, haversineKm, CITY_COORDS,
+};

@@ -41,6 +41,8 @@ const migrate = async () => {
   const summary = { changes: [] };
   // Host-created listings are owned by a User.
   await addColumnIfMissing('experiences', 'ownerUserId', 'INT NULL', summary);
+  // Pincode split out of the address for precise geocoding (experiences-near-you).
+  await addColumnIfMissing('experiences', 'pincode', 'VARCHAR(12) NULL', summary);
   // Host business/company name on the user profile.
   await addColumnIfMissing('users', 'company', 'VARCHAR(180) NULL', summary);
 

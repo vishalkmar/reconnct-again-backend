@@ -1,4 +1,5 @@
 const asyncHandler = require('express-async-handler');
+const { geocodeExperienceById } = require('../services/geocode.service');
 const slugify = require('slugify');
 const { Op } = require('sequelize');
 const {
@@ -202,6 +203,7 @@ const mapFormToExperience = (form = {}) => {
     typeId: Array.isArray(form.typeIds) ? (form.typeIds[0] || null) : null,
     location: form.location || null,
     city: form.city || null,
+    pincode: form.pincode || null,
     nearbyLocation: form.nearbyLocation || null,
     about: form.about || null,
     mode: ['online', 'offline', 'hybrid'].includes(form.mode) ? form.mode : 'offline',
@@ -314,6 +316,7 @@ const toHostForm = (exp) => {
     name: j.name || '',
     location: j.location || '',
     city: j.city || '',
+    pincode: j.pincode || '',
     nearbyLocation: j.nearbyLocation || '',
     durationLabel: p.durationLabel || (j.data && j.data.durationLabel) || '',
     about: j.about || '',
@@ -387,6 +390,7 @@ const createMine = asyncHandler(async (req, res) => {
   if (req.supplier) data.data.submittedVia = 'supplier_portal';
   data.slug = await uniqueSlug(form.slug || data.name);
   const row = await Experience.create(data);
+  geocodeExperienceById(row.id, { force: true }).catch(() => {});
   if (row.supplierId) ensureAccountManagerAssigned(row.supplierId).catch(() => {});
   if (row.ownerUserId) ensureHostAccountManagerAssigned(row.ownerUserId).catch(() => {});
   if (submit) {
@@ -482,6 +486,7 @@ const upAckMine = asyncHandler(async (req, res) => {
 
   row.qcReview = { ...qc, supplierAck: { at: new Date().toISOString(), note } };
   await row.save();
+  geocodeExperienceById(row.id, { force: true }).catch(() => {});
 
   // Straight back to whoever submitted it (the BD) — plus Center Ops's queue.
   await reviewNotify.notifySubmitter(row, {

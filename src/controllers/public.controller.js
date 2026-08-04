@@ -163,6 +163,54 @@ const hostBadge = async (j) => {
     : null;
 };
 
+// Precise (float) great-circle km — the geo controller's rounds to whole km,
+// which is too coarse to sort listings a few hundred metres apart.
+const distanceKm = (lat1, lon1, lat2, lon2) => {
+  const R = 6371;
+  const toRad = (d) => (d * Math.PI) / 180;
+  const dLat = toRad(lat2 - lat1); const dLon = toRad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+};
+
+/*
+  GET /api/public/geo/nearby-experiences?lat=&lon=&radius=10&limit=40
+  Live experiences near the user, by REAL distance from their coordinates
+  (experiences are geocoded — see geocode.service + the backfill). Sorted
+  nearest-first; radius in km (default 10). Falls back to nothing rather than
+  guessing when the user sends no coords.
+*/
+const nearbyExperiences = asyncHandler(async (req, res) => {
+  const lat = Number(req.query.lat); const lon = Number(req.query.lon);
+  const radius = Math.min(200, Math.max(1, Number(req.query.radius) || 10));
+  const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 40));
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return ok(res, { experiences: [], radius, message: 'lat and lon are required' });
+  }
+
+  const rows = await Experience.findAll({
+    where: {
+      status: 'published', isActive: true,
+      latitude: { [Op.ne]: null }, longitude: { [Op.ne]: null },
+    },
+    include: INCLUDE,
+  });
+
+  const withDist = [];
+  for (const e of rows) {
+    const d = distanceKm(lat, lon, Number(e.latitude), Number(e.longitude));
+    if (d <= radius) withDist.push({ exp: e, d });
+  }
+  withDist.sort((a, b) => a.d - b.d);
+
+  const experiences = await Promise.all(withDist.slice(0, limit).map(async ({ exp, d }) => ({
+    ...(await cardShape(exp)),
+    distanceKm: Math.round(d * 10) / 10,
+  })));
+
+  return ok(res, { experiences, radius, count: experiences.length });
+});
+
 // GET /api/public/experiences
 //   ?q= &categoryId= &audienceId= &priceMin= &priceMax= &featured=1 &sort=
 const listExperiences = asyncHandler(async (req, res) => {
@@ -299,4 +347,4 @@ const cities = asyncHandler(async (req, res) => {
   return ok(res, { cities: list });
 });
 
-module.exports = { listExperiences, getExperience, taxonomy, types, cities, cashfreeLink };
+module.exports = { listExperiences, nearbyExperiences, getExperience, taxonomy, types, cities, cashfreeLink };

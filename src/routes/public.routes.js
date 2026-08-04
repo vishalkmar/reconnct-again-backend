@@ -23,5 +23,7 @@ router.get('/offer-banners', appScreen.getBanners);
 // Location intelligence — detect city by IP, nearby suggestions via LLM.
 router.get('/geo/locate', geo.locate);
 router.get('/geo/nearby', geo.nearby);
+router.get('/geo/place-image', geo.placeImage);
+router.get('/geo/nearby-experiences', c.nearbyExperiences);
 
 module.exports = router;
