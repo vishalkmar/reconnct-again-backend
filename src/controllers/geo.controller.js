@@ -190,7 +190,9 @@ const CITY_IMAGE = {
 
 // Generic hero image used only when we truly can't find anything else — the
 // "You are here" card must NEVER be blank.
-const GENERIC_IMAGE = 'https://images.unsplash.com/photo-1524492412937-b28074a5d7da?w=800&q=80';
+// A NEUTRAL cityscape (not a specific monument) so a fallback never implies the
+// wrong place.
+const GENERIC_IMAGE = 'https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?w=800&q=80';
 
 // Bump a Wikipedia thumbnail URL up to ~800px wide. Wikimedia thumb URLs end in
 // "/<n>px-Name.jpg" — swapping the size gives a bigger yet still light image
@@ -225,10 +227,12 @@ const landmarkNear = async ({ area, city }) => {
   const model = process.env.LLM_MODEL;
   if (!base || !key || !model || (!area && !city)) return null;
   const where = [area, city].filter(Boolean).join(', ');
-  const prompt = 'Name ONE famous, well-photographed landmark closest to this exact place — '
-    + 'a metro station, shopping mall, monument, market or temple people would recognise. '
-    + 'Reply with ONLY its common Wikipedia-style name, no address, no extra words.\n'
-    + `Place: "${where}"`;
+  const prompt = 'Name ONE real, well-photographed place NEAR this exact location, choosing in this '
+    + 'STRICT priority order: 1) a famous monument / tourist landmark nearby; else '
+    + '2) a big shopping mall or shopping complex nearby; else 3) the nearest metro station. '
+    + 'It must genuinely be in or beside this area (not a distant city). Reply with ONLY its '
+    + 'common Wikipedia-style name, no address, no extra words.\n'
+    + `Location: "${where}"`;
   const j = await safeFetch(`${base.replace(/\/$/, '')}/chat/completions`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
