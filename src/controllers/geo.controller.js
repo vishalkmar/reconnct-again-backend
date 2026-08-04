@@ -200,24 +200,62 @@ const wikiSummary = async (title) => {
   return { name: j.title || title, image: img, blurb: j.extract || '', link: (j.content_urls && j.content_urls.desktop && j.content_urls.desktop.page) || null };
 };
 
-// GET /api/public/geo/place-image?city=&place=
-// A single "You are here" hero: a famous place near the user + its real photo.
-// Tries the specific landmark first, then the city, then a curated fallback.
+// Ask the LLM for ONE famous, photographable landmark closest to the user's
+// exact spot — a metro station, mall, monument or market in this area — so the
+// "You are here" hero shows something the user will actually recognise around
+// them, not just a generic city photo. Returns null if the LLM isn't configured.
+const landmarkNear = async ({ area, city }) => {
+  const base = process.env.LLM_BASE_URL;
+  const key = process.env.LLM_API_KEY;
+  const model = process.env.LLM_MODEL;
+  if (!base || !key || !model || (!area && !city)) return null;
+  const where = [area, city].filter(Boolean).join(', ');
+  const prompt = 'Name ONE famous, well-photographed landmark closest to this exact place — '
+    + 'a metro station, shopping mall, monument, market or temple people would recognise. '
+    + 'Reply with ONLY its common Wikipedia-style name, no address, no extra words.\n'
+    + `Place: "${where}"`;
+  const j = await safeFetch(`${base.replace(/\/$/, '')}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: prompt }], temperature: 0.2, max_tokens: 24 }),
+  }, 8000);
+  const text = j && j.choices && j.choices[0] && j.choices[0].message && j.choices[0].message.content;
+  if (!text) return null;
+  const name = String(text).trim().replace(/^["'\s]+|["'.\s]+$/g, '').split('\n')[0].trim();
+  return name && name.length <= 60 ? name : null;
+};
+
+// GET /api/public/geo/place-image?city=&area=&place=
+// A single "You are here" hero: a famous place NEAR the user's exact spot + its
+// real photo. Order: an explicit place → an LLM-picked nearby landmark (metro/
+// mall/monument for this area) → the city → a curated fallback image.
 const placeImage = asyncHandler(async (req, res) => {
   const city = String(req.query.city || '').trim();
+  const area = String(req.query.area || '').trim();
   const place = String(req.query.place || '').trim();
-  for (const title of [place, place && city ? `${place}, ${city}` : '', city].filter(Boolean)) {
+
+  // If the caller didn't name a place, let the LLM find the closest famous one.
+  const landmark = place || (await landmarkNear({ area, city }));
+
+  const titles = [
+    landmark,
+    landmark && city ? `${landmark}, ${city}` : '',
+    area && city ? `${area}, ${city}` : '',
+    city,
+  ].filter(Boolean);
+  for (const title of titles) {
     // eslint-disable-next-line no-await-in-loop
     const hit = await wikiSummary(title);
-    if (hit) return ok(res, { ...hit, city: city || null, source: 'wikipedia' });
+    if (hit) return ok(res, { ...hit, city: city || null, area: area || null, source: 'wikipedia' });
   }
   const fallback = CITY_IMAGE[city.toLowerCase()];
   return ok(res, {
-    name: place || city || 'Near you',
+    name: landmark || area || city || 'Near you',
     image: fallback || null,
     blurb: '',
     link: null,
     city: city || null,
+    area: area || null,
     source: fallback ? 'curated' : 'none',
   });
 });
