@@ -291,6 +291,20 @@ const runBackgroundDbWork = async () => {
     console.warn('[DB] Featured tabs seed failed (non-fatal):', err.message);
   }
 
+  // Geocode any experiences still missing lat/long so "experiences near you"
+  // and the distance bands work. Idempotent + throttled + fire-and-forget: it
+  // never delays boot, on the FIRST deploy it fills every existing listing, and
+  // on later boots it finds nothing to do. New listings are geocoded on save.
+  (async () => {
+    try {
+      const { backfillExperienceCoords } = require('./scripts/backfillExperienceCoords');
+      const r = await backfillExperienceCoords({ log: () => {} });
+      if (r.done) console.log(`[geo] Backfilled coordinates for ${r.done}/${r.attempted} experience(s)`);
+    } catch (err) {
+      console.warn('[geo] Coordinate backfill failed (non-fatal):', err.message);
+    }
+  })();
+
   console.log('[DB] Background tasks complete — schema fully synced');
 
   // Booking reminder sweep (12h-before / 2h-before emails, guest + host) —
