@@ -9,6 +9,7 @@ const {
   snapshotSections, logObjections,
 } = require('../utils/reviewSections');
 const { copsTab, COPS_TABS } = require('../utils/experienceStatus');
+const { applyGoLivePricing } = require('../utils/goLivePricing');
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
 const cmService = require('../services/categoryManager.service');
@@ -341,6 +342,9 @@ const directList = asyncHandler(async (req, res) => {
     ? await Experience.count({ where: { supplierId: item.supplierId, status: 'published', isActive: true } })
     : 0;
   if (liveCount === 0) return fail(res, 'This supplier isn’t onboarded yet — send it to QCOPS instead', 400);
+
+  // COPS sets the final B2B price + GST / discount / convenience fee here.
+  applyGoLivePricing(item, req.body);
 
   item.status = 'published';
   item.isActive = true;

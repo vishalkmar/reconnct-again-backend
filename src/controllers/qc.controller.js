@@ -5,6 +5,7 @@ const {
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { validateQcFeedback, QC_FEEDBACK_FIELDS } = require('../utils/qcFeedback');
+const { applyGoLivePricing } = require('../utils/goLivePricing');
 const { istToInstant } = require('../utils/istTime');
 const { ownerContactFor } = require('../utils/ownerContact');
 const reviewNotify = require('../services/reviewNotify.service');
@@ -269,6 +270,8 @@ const goLive = asyncHandler(async (req, res) => {
   const okStage = item.reviewStage === 'qc_passed'
     || (item.reviewStage === 'under_progress' && item.qcReview?.upState === 'bd_approved');
   if (!okStage) return fail(res, 'This item is not ready to go live yet', 400);
+  // COPS sets the final B2B price + GST / discount / convenience fee here.
+  applyGoLivePricing(item, req.body);
   await publishLive(item, req.teamMember ? req.teamMember.id : null);
   return ok(res, { item: item.toJSON() }, 'Published — now live on web & app');
 });
