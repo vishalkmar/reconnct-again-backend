@@ -57,4 +57,35 @@ const sendResetEmail = async ({ to, name, url, roleLabel }) => {
   return send({ to, subject: 'Reset your reconnct password', html, text });
 };
 
-module.exports = { FRONTEND_BASE, makeToken, hashToken, resetUrl, sendResetEmail };
+// Security notification sent AFTER a password is successfully reset, so the
+// account owner knows — and can act fast if it wasn't them.
+const sendResetDoneEmail = async ({ to, name, roleLabel, portal }) => {
+  const loginUrl = `${FRONTEND_BASE}/${portal}/login`;
+  const html = emailShell({
+    preheader: 'Your reconnct password was changed',
+    eyebrow: 'Password changed',
+    heading: `Your password was reset, ${escapeHtml(name || 'there')}`,
+    bodyHtml: `
+      <p style="color:#374151;line-height:1.6;margin:0 0 16px;">
+        The password for your <strong>${escapeHtml(roleLabel || 'account')}</strong> (${escapeHtml(to)})
+        was just changed. If this was you, you're all set — you can sign in with your new password.
+      </p>
+      ${ctaButton(loginUrl, 'Sign in')}
+      <p style="color:#B91C1C;line-height:1.6;font-size:13px;margin:20px 0 0;">
+        <strong>Didn't change it?</strong> Someone else may have access to your email — reset your password
+        again right away and contact the reconnct team.
+      </p>
+    `,
+  });
+  const text = [
+    `Your reconnct password (${roleLabel || 'account'}) was just changed.`,
+    `Sign in: ${loginUrl}`,
+    '',
+    "Didn't change it? Reset it again immediately and contact the reconnct team.",
+  ].join('\n');
+  return send({ to, subject: 'Your reconnct password was changed', html, text });
+};
+
+module.exports = {
+  FRONTEND_BASE, makeToken, hashToken, resetUrl, sendResetEmail, sendResetDoneEmail,
+};

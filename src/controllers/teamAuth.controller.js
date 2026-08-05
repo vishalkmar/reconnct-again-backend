@@ -5,7 +5,7 @@ const { availableRolesFor } = require('../models/teamMember.model');
 const { signToken } = require('../utils/jwt');
 const { ok, fail } = require('../utils/response');
 const {
-  makeToken, hashToken, resetUrl, sendResetEmail,
+  makeToken, hashToken, resetUrl, sendResetEmail, sendResetDoneEmail,
 } = require('../services/passwordReset.service');
 
 // The member as the client should see it for a given ACTIVE role — a dual-role
@@ -95,6 +95,9 @@ const resetPassword = asyncHandler(async (req, res) => {
   member.passwordResetToken = null;
   member.passwordResetExpires = null;
   await member.save();
+  sendResetDoneEmail({
+    to: email, name: member.name, roleLabel: 'Team Portal account', portal: 'team',
+  }).catch((e) => console.error('[team reset-done] mail failed:', e.message));
   return ok(res, {}, 'Your password has been reset. You can now sign in.');
 });
 

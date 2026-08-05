@@ -210,23 +210,25 @@ const mapFormToExperience = (form = {}) => {
     mainImage: photos[0] || null,
     gallery: photos,
     videos: videos.map((url) => (typeof url === 'string' ? { type: 'video', url } : url)),
-    // The person adding a listing sets the B2C (customer-reference) price + the
-    // experience attributes (capacity/duration). The B2B price + GST/discount/
-    // convenience are set by COPS at go-live, so `pricing.adultPrice` stays 0
-    // here — it's filled during review before the listing goes live.
+    // The adder sets BOTH prices: B2B is the working price (COPS adds GST /
+    // discount / convenience on top of it at go-live → the final price customers
+    // see), and B2C is a reference the adder records (shown to COPS at go-live,
+    // saved in the DB, not used for booking).
     priceMethod: form.priceMethod || 'per_person',
     pricing: {
-      adultPrice: 0, // B2B — COPS sets this at go-live
+      adultPrice: Number(form.adultPrice) || 0, // B2B — the working price
+      childrenEnabled: !!form.childrenEnabled,
+      childBands: Array.isArray(form.childBands) ? form.childBands : [],
       capacity: Number(form.capacity) || 0,
       durationHours: Number(form.durationHours) || 0,
       durationMinutes: Number(form.durationMinutes) || 0,
       durationLabel,
     },
-    b2cPriceMethod: form.priceMethod || 'per_person',
+    b2cPriceMethod: form.b2cPriceMethod || form.priceMethod || 'per_person',
     b2cPricing: {
-      adultPrice: Number(form.adultPrice) || 0,
-      childrenEnabled: !!form.childrenEnabled,
-      childBands: Array.isArray(form.childBands) ? form.childBands : [],
+      adultPrice: Number(form.b2cAdultPrice) || 0,
+      childrenEnabled: !!form.b2cChildrenEnabled,
+      childBands: Array.isArray(form.b2cChildBands) ? form.b2cChildBands : [],
     },
     sourceName: form.sourceName || null,
     sourceLink: form.sourceLink || null,
@@ -341,14 +343,19 @@ const toHostForm = (exp) => {
     termsConditions: j.termsConditions || '',
     privacyPolicy: j.privacyPolicy || '',
     refundCancellationPolicy: j.refundCancellationPolicy || '',
-    // The add form edits the B2C price (COPS owns the B2B price separately).
-    priceMethod: j.b2cPriceMethod || j.priceMethod || 'per_person',
-    adultPrice: b2c.adultPrice ? String(b2c.adultPrice) : '',
-    childrenEnabled: !!b2c.childrenEnabled,
-    childBands: b2c.childBands || [],
+    // B2B working price (drives booking, COPS adds GST/discount/convenience).
+    priceMethod: j.priceMethod || 'per_person',
+    adultPrice: p.adultPrice ? String(p.adultPrice) : '',
+    childrenEnabled: !!p.childrenEnabled,
+    childBands: p.childBands || [],
     capacity: p.capacity || 8,
     durationHours: p.durationHours || 0,
     durationMinutes: p.durationMinutes || 0,
+    // B2C reference price (shown to COPS, saved in DB).
+    b2cPriceMethod: j.b2cPriceMethod || 'per_person',
+    b2cAdultPrice: b2c.adultPrice ? String(b2c.adultPrice) : '',
+    b2cChildrenEnabled: !!b2c.childrenEnabled,
+    b2cChildBands: b2c.childBands || [],
     sourceName: j.sourceName || '',
     sourceLink: j.sourceLink || '',
     schedule: j.schedule && Array.isArray(j.schedule.dates) ? j.schedule : { dates: [] },

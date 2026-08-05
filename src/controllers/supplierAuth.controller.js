@@ -4,7 +4,7 @@ const { Supplier } = require('../models');
 const { signToken } = require('../utils/jwt');
 const { ok, fail } = require('../utils/response');
 const {
-  makeToken, hashToken, resetUrl, sendResetEmail,
+  makeToken, hashToken, resetUrl, sendResetEmail, sendResetDoneEmail,
 } = require('../services/passwordReset.service');
 
 // POST /api/supplier/auth/login  { email, password }
@@ -60,6 +60,9 @@ const resetPassword = asyncHandler(async (req, res) => {
   supplier.passwordResetToken = null;
   supplier.passwordResetExpires = null;
   await supplier.save();
+  sendResetDoneEmail({
+    to: email, name: supplier.companyName || supplier.supplierName, roleLabel: 'Supplier account', portal: 'supplier',
+  }).catch((e) => console.error('[supplier reset-done] mail failed:', e.message));
   return ok(res, {}, 'Your password has been reset. You can now sign in.');
 });
 
