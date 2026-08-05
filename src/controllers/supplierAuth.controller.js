@@ -1,7 +1,11 @@
 const asyncHandler = require('express-async-handler');
+const { Op } = require('sequelize');
 const { Supplier } = require('../models');
 const { signToken } = require('../utils/jwt');
 const { ok, fail } = require('../utils/response');
+const {
+  makeToken, hashToken, resetUrl, sendResetEmail,
+} = require('../services/passwordReset.service');
 
 // POST /api/supplier/auth/login  { email, password }
 const login = asyncHandler(async (req, res) => {
@@ -24,4 +28,41 @@ const login = asyncHandler(async (req, res) => {
 // GET /api/supplier/auth/me
 const me = asyncHandler(async (req, res) => ok(res, { supplier: req.supplier.toSafeJSON() }));
 
-module.exports = { login, me };
+// POST /api/supplier/auth/forgot-password  { email }
+const forgotPassword = asyncHandler(async (req, res) => {
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  if (!email) return fail(res, 'Email is required', 400);
+  const supplier = await Supplier.findOne({ where: { email } });
+  if (supplier && supplier.isActive) {
+    const { raw, hash, expires } = makeToken();
+    supplier.passwordResetToken = hash;
+    supplier.passwordResetExpires = expires;
+    await supplier.save();
+    sendResetEmail({
+      to: email, name: supplier.companyName || supplier.supplierName, url: resetUrl('supplier', email, raw), roleLabel: 'Supplier account',
+    }).catch((e) => console.error('[supplier forgot-password] mail failed:', e.message));
+  }
+  return ok(res, {}, 'If that email is registered, a password-reset link is on its way.');
+});
+
+// POST /api/supplier/auth/reset-password  { email, token, password }
+const resetPassword = asyncHandler(async (req, res) => {
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+  if (!email || !token || !password) return fail(res, 'Email, token and new password are required', 400);
+  if (password.length < 6) return fail(res, 'Password must be at least 6 characters', 400);
+  const supplier = await Supplier.findOne({
+    where: { email, passwordResetToken: hashToken(token), passwordResetExpires: { [Op.gt]: new Date() } },
+  });
+  if (!supplier) return fail(res, 'This reset link is invalid or has expired. Please request a new one.', 400);
+  supplier.password = password; // model hook re-hashes
+  supplier.passwordResetToken = null;
+  supplier.passwordResetExpires = null;
+  await supplier.save();
+  return ok(res, {}, 'Your password has been reset. You can now sign in.');
+});
+
+module.exports = {
+  login, me, forgotPassword, resetPassword,
+};

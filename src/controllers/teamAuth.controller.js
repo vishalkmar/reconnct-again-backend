@@ -1,8 +1,12 @@
 const asyncHandler = require('express-async-handler');
+const { Op } = require('sequelize');
 const { TeamMember } = require('../models');
 const { availableRolesFor } = require('../models/teamMember.model');
 const { signToken } = require('../utils/jwt');
 const { ok, fail } = require('../utils/response');
+const {
+  makeToken, hashToken, resetUrl, sendResetEmail,
+} = require('../services/passwordReset.service');
 
 // The member as the client should see it for a given ACTIVE role — a dual-role
 // COPS working the QCOPS queue must look like a qcops to the whole frontend
@@ -58,4 +62,42 @@ const selectRole = asyncHandler(async (req, res) => {
 // GET /api/team/auth/me
 const me = asyncHandler(async (req, res) => ok(res, shape(req.teamMember, req.activeRole)));
 
-module.exports = { login, selectRole, me };
+// POST /api/team/auth/forgot-password  { email }
+// Always answers the same way so it never reveals whether an email is registered.
+const forgotPassword = asyncHandler(async (req, res) => {
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  if (!email) return fail(res, 'Email is required', 400);
+  const member = await TeamMember.findOne({ where: { email } });
+  if (member) {
+    const { raw, hash, expires } = makeToken();
+    member.passwordResetToken = hash;
+    member.passwordResetExpires = expires;
+    await member.save();
+    sendResetEmail({
+      to: email, name: member.name, url: resetUrl('team', email, raw), roleLabel: 'Team Portal account',
+    }).catch((e) => console.error('[team forgot-password] mail failed:', e.message));
+  }
+  return ok(res, {}, 'If that email is registered, a password-reset link is on its way.');
+});
+
+// POST /api/team/auth/reset-password  { email, token, password }
+const resetPassword = asyncHandler(async (req, res) => {
+  const email = String(req.body?.email || '').toLowerCase().trim();
+  const token = String(req.body?.token || '');
+  const password = String(req.body?.password || '');
+  if (!email || !token || !password) return fail(res, 'Email, token and new password are required', 400);
+  if (password.length < 6) return fail(res, 'Password must be at least 6 characters', 400);
+  const member = await TeamMember.findOne({
+    where: { email, passwordResetToken: hashToken(token), passwordResetExpires: { [Op.gt]: new Date() } },
+  });
+  if (!member) return fail(res, 'This reset link is invalid or has expired. Please request a new one.', 400);
+  member.password = password; // model hook re-hashes
+  member.passwordResetToken = null;
+  member.passwordResetExpires = null;
+  await member.save();
+  return ok(res, {}, 'Your password has been reset. You can now sign in.');
+});
+
+module.exports = {
+  login, selectRole, me, forgotPassword, resetPassword,
+};

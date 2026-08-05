@@ -5,6 +5,8 @@ const c = require('../controllers/supplierAuth.controller');
 // Mounted at /api/supplier/auth — a supplier's own sign-in, separate from
 // admin/user/team-member auth.
 router.post('/login', c.login);
+router.post('/forgot-password', c.forgotPassword);
+router.post('/reset-password', c.resetPassword);
 router.get('/me', authenticateSupplier, c.me);
 
 module.exports = router;

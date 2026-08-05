@@ -210,16 +210,26 @@ const mapFormToExperience = (form = {}) => {
     mainImage: photos[0] || null,
     gallery: photos,
     videos: videos.map((url) => (typeof url === 'string' ? { type: 'video', url } : url)),
+    // The person adding a listing sets the B2C (customer-reference) price + the
+    // experience attributes (capacity/duration). The B2B price + GST/discount/
+    // convenience are set by COPS at go-live, so `pricing.adultPrice` stays 0
+    // here — it's filled during review before the listing goes live.
     priceMethod: form.priceMethod || 'per_person',
     pricing: {
-      adultPrice: Number(form.adultPrice) || 0,
-      childrenEnabled: !!form.childrenEnabled,
-      childBands: Array.isArray(form.childBands) ? form.childBands : [],
+      adultPrice: 0, // B2B — COPS sets this at go-live
       capacity: Number(form.capacity) || 0,
       durationHours: Number(form.durationHours) || 0,
       durationMinutes: Number(form.durationMinutes) || 0,
       durationLabel,
     },
+    b2cPriceMethod: form.priceMethod || 'per_person',
+    b2cPricing: {
+      adultPrice: Number(form.adultPrice) || 0,
+      childrenEnabled: !!form.childrenEnabled,
+      childBands: Array.isArray(form.childBands) ? form.childBands : [],
+    },
+    sourceName: form.sourceName || null,
+    sourceLink: form.sourceLink || null,
     currency: 'INR',
     termsConditions: form.termsConditions || null,
     privacyPolicy: form.privacyPolicy || null,
@@ -244,6 +254,7 @@ const mapFormToExperience = (form = {}) => {
 const toHostListing = (exp) => {
   const j = exp.toJSON ? exp.toJSON() : exp;
   const pricing = j.pricing || {};
+  const b2c = j.b2cPricing || {};
   const perDay = j.priceMethod === 'per_day' || j.priceMethod === 'days';
   const hostStatus = (j.data && j.data.hostStatus) || 'draft';
   return {
@@ -252,7 +263,8 @@ const toHostListing = (exp) => {
     status: hostStatus, // draft | pending
     reviewStatus: j.status, // draft | published | archived (admin side)
     title: j.name,
-    price: Number(pricing.adultPrice) || 0,
+    // Show the B2B price once COPS has set it; until then the adder's B2C price.
+    price: Number(pricing.adultPrice) || Number(b2c.adultPrice) || 0,
     priceUnit: perDay ? 'day' : 'person',
     durationLabel: pricing.durationLabel || (j.data && j.data.durationLabel) || '',
     image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || null,
@@ -307,6 +319,7 @@ const toHostListing = (exp) => {
 const toHostForm = (exp) => {
   const j = exp.toJSON ? exp.toJSON() : exp;
   const p = j.pricing || {};
+  const b2c = j.b2cPricing || {};
   return {
     id: j.id,
     audiences: j.audiences || [],
@@ -328,13 +341,16 @@ const toHostForm = (exp) => {
     termsConditions: j.termsConditions || '',
     privacyPolicy: j.privacyPolicy || '',
     refundCancellationPolicy: j.refundCancellationPolicy || '',
-    priceMethod: j.priceMethod || 'per_person',
-    adultPrice: p.adultPrice ? String(p.adultPrice) : '',
-    childrenEnabled: !!p.childrenEnabled,
-    childBands: p.childBands || [],
+    // The add form edits the B2C price (COPS owns the B2B price separately).
+    priceMethod: j.b2cPriceMethod || j.priceMethod || 'per_person',
+    adultPrice: b2c.adultPrice ? String(b2c.adultPrice) : '',
+    childrenEnabled: !!b2c.childrenEnabled,
+    childBands: b2c.childBands || [],
     capacity: p.capacity || 8,
     durationHours: p.durationHours || 0,
     durationMinutes: p.durationMinutes || 0,
+    sourceName: j.sourceName || '',
+    sourceLink: j.sourceLink || '',
     schedule: j.schedule && Array.isArray(j.schedule.dates) ? j.schedule : { dates: [] },
     photos: j.gallery || [],
     videos: Array.isArray(j.videos) ? j.videos.map((v) => (typeof v === 'string' ? v : v.url)).filter(Boolean) : [],

@@ -100,11 +100,22 @@ const Experience = sequelize.define(
     status: { type: DataTypes.ENUM('draft', 'pending_review', 'published', 'archived'), defaultValue: 'draft' },
 
     // ── Pricing (Task 4 #9) ──────────────────────────────────────────────
+    // B2B pricing — the business rate COPS sets at go-live; GST/discount/
+    // convenience below apply on THIS, and it drives the public/booking price.
     // priceMethod: per_person | per_day | days | per_hours
     priceMethod: { type: DataTypes.STRING(30), allowNull: true },
     // The whole dynamic pricing config (adult/children age-bands, duration…).
     pricing: { type: DataTypes.JSON, allowNull: false, defaultValue: {} },
     currency: { type: DataTypes.STRING(8), defaultValue: 'INR' },
+
+    // ── B2C pricing + Source ─────────────────────────────────────────────
+    // Entered by whoever ADDS the experience (supplier/host/BD/admin), shown to
+    // COPS at go-live as reference. Same shape as the B2B pricing above.
+    b2cPriceMethod: { type: DataTypes.STRING(30), allowNull: true },
+    b2cPricing: { type: DataTypes.JSON, allowNull: true, defaultValue: {} },
+    // Where this experience was sourced from (a listing/site) — name + link.
+    sourceName: { type: DataTypes.STRING(200), allowNull: true },
+    sourceLink: { type: DataTypes.STRING(500), allowNull: true },
 
     // ── Tax & discount (GST task) ────────────────────────────────────────
     gstRate: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // 0/5/12/18/28

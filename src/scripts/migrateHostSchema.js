@@ -43,6 +43,17 @@ const migrate = async () => {
   await addColumnIfMissing('experiences', 'ownerUserId', 'INT NULL', summary);
   // Pincode split out of the address for precise geocoding (experiences-near-you).
   await addColumnIfMissing('experiences', 'pincode', 'VARCHAR(12) NULL', summary);
+  // B2C pricing + source (entered by the adder) — B2B pricing + GST/discount/
+  // convenience stay COPS-set at go-live.
+  await addColumnIfMissing('experiences', 'b2cPriceMethod', 'VARCHAR(30) NULL', summary);
+  await addColumnIfMissing('experiences', 'b2cPricing', 'JSON NULL', summary);
+  await addColumnIfMissing('experiences', 'sourceName', 'VARCHAR(200) NULL', summary);
+  await addColumnIfMissing('experiences', 'sourceLink', 'VARCHAR(500) NULL', summary);
+  // Self-service forgot/reset password for team members + suppliers.
+  await addColumnIfMissing('team_members', 'passwordResetToken', 'VARCHAR(255) NULL', summary);
+  await addColumnIfMissing('team_members', 'passwordResetExpires', 'DATETIME NULL', summary);
+  await addColumnIfMissing('suppliers', 'passwordResetToken', 'VARCHAR(255) NULL', summary);
+  await addColumnIfMissing('suppliers', 'passwordResetExpires', 'DATETIME NULL', summary);
   // Host business/company name on the user profile.
   await addColumnIfMissing('users', 'company', 'VARCHAR(180) NULL', summary);
 

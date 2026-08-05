@@ -86,6 +86,9 @@ const TeamMember = sequelize.define(
     // round-robin logs, etc.
     employeeCode: { type: DataTypes.STRING(20), allowNull: false },
     password: { type: DataTypes.STRING(255), allowNull: false },
+    // Forgot-password: a hashed one-time token + its expiry (self-service reset).
+    passwordResetToken: { type: DataTypes.STRING(255), allowNull: true },
+    passwordResetExpires: { type: DataTypes.DATE, allowNull: true },
     roleType: { type: DataTypes.ENUM(...ROLE_TYPES), allowNull: false },
     // Flat capability flags — see PERMISSION_KEYS. Stored as JSON so adding a
     // new capability later doesn't need a migration.
@@ -128,6 +131,8 @@ TeamMember.prototype.comparePassword = function (plain) {
 TeamMember.prototype.toSafeJSON = function () {
   const obj = this.toJSON();
   delete obj.password;
+  delete obj.passwordResetToken;
+  delete obj.passwordResetExpires;
   return obj;
 };
 

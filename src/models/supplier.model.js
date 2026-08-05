@@ -38,6 +38,9 @@ const Supplier = sequelize.define(
     // Supplier's own login — bcrypt hashed like Admin/TeamMember. Null until
     // someone sets a password for this supplier.
     password: { type: DataTypes.STRING(255), allowNull: true },
+    // Forgot-password: a hashed one-time token + its expiry (self-service reset).
+    passwordResetToken: { type: DataTypes.STRING(255), allowNull: true },
+    passwordResetExpires: { type: DataTypes.DATE, allowNull: true },
     lastLoginAt: { type: DataTypes.DATE, allowNull: true },
     // Auto-assigned (least-loaded round robin across active account_manager
     // team members) the first time any experience gets linked to this
@@ -69,6 +72,8 @@ Supplier.prototype.comparePassword = function (plain) {
 Supplier.prototype.toSafeJSON = function () {
   const obj = this.toJSON();
   delete obj.password;
+  delete obj.passwordResetToken;
+  delete obj.passwordResetExpires;
   return obj;
 };
 
