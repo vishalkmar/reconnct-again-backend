@@ -1,5 +1,4 @@
 const asyncHandler = require('express-async-handler');
-const { Op } = require('sequelize');
 const { Supplier } = require('../models');
 const { signToken } = require('../utils/jwt');
 const { ok, fail } = require('../utils/response');
@@ -52,10 +51,14 @@ const resetPassword = asyncHandler(async (req, res) => {
   const password = String(req.body?.password || '');
   if (!email || !token || !password) return fail(res, 'Email, token and new password are required', 400);
   if (password.length < 6) return fail(res, 'Password must be at least 6 characters', 400);
+  // Token-only lookup + JS expiry check (SQL DATETIME comparison is timezone-
+  // skew prone, which was making fresh links look "expired").
   const supplier = await Supplier.findOne({
-    where: { email, passwordResetToken: hashToken(token), passwordResetExpires: { [Op.gt]: new Date() } },
+    where: { email, passwordResetToken: hashToken(token) },
   });
-  if (!supplier) return fail(res, 'This reset link is invalid or has expired. Please request a new one.', 400);
+  if (!supplier) return fail(res, 'This reset link is invalid or has already been used. Please request a new one.', 400);
+  const expiresAt = supplier.passwordResetExpires ? new Date(supplier.passwordResetExpires).getTime() : 0;
+  if (!expiresAt || expiresAt < Date.now()) return fail(res, 'This reset link has expired. Please request a new one.', 400);
   supplier.password = password; // model hook re-hashes
   supplier.passwordResetToken = null;
   supplier.passwordResetExpires = null;

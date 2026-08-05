@@ -40,8 +40,8 @@ const sendResetEmail = async ({ to, name, url, roleLabel }) => {
       </p>
       ${ctaButton(url, 'Reset my password')}
       <p style="color:#6B7280;line-height:1.6;font-size:12px;margin:20px 0 0;">
-        If the button doesn't work, copy this link into your browser:<br/>
-        <span style="word-break:break-all;color:#2563eb;">${escapeHtml(url)}</span>
+        If the button doesn't work, click this link:<br/>
+        <a href="${escapeHtml(url)}" style="word-break:break-all;color:#2563eb;">${escapeHtml(url)}</a>
       </p>
       <p style="color:#6B7280;line-height:1.6;font-size:12px;margin:14px 0 0;">
         Didn't request this? You can safely ignore this email — your password stays the same.

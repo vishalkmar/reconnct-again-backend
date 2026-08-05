@@ -1,5 +1,4 @@
 const asyncHandler = require('express-async-handler');
-const { Op } = require('sequelize');
 const { TeamMember } = require('../models');
 const { availableRolesFor } = require('../models/teamMember.model');
 const { signToken } = require('../utils/jwt');
@@ -87,10 +86,15 @@ const resetPassword = asyncHandler(async (req, res) => {
   const password = String(req.body?.password || '');
   if (!email || !token || !password) return fail(res, 'Email, token and new password are required', 400);
   if (password.length < 6) return fail(res, 'Password must be at least 6 characters', 400);
+  // Look the token up on its own, then check expiry in JS — comparing DATETIME
+  // in SQL (Op.gt) is prone to server/connection timezone skew, which was
+  // making brand-new links look "expired".
   const member = await TeamMember.findOne({
-    where: { email, passwordResetToken: hashToken(token), passwordResetExpires: { [Op.gt]: new Date() } },
+    where: { email, passwordResetToken: hashToken(token) },
   });
-  if (!member) return fail(res, 'This reset link is invalid or has expired. Please request a new one.', 400);
+  if (!member) return fail(res, 'This reset link is invalid or has already been used. Please request a new one.', 400);
+  const expiresAt = member.passwordResetExpires ? new Date(member.passwordResetExpires).getTime() : 0;
+  if (!expiresAt || expiresAt < Date.now()) return fail(res, 'This reset link has expired. Please request a new one.', 400);
   member.password = password; // model hook re-hashes
   member.passwordResetToken = null;
   member.passwordResetExpires = null;
