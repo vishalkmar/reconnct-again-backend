@@ -203,6 +203,9 @@ const tally = asyncHandler(async (req, res) => {
     rows = rows.filter((r) => (r.supplier || '').toLowerCase().includes(q));
   }
 
+  const totalCount = rows.length; // all statuses, for context
+  // Only PAID bookings count toward the tally — pending/cancelled are excluded
+  // from the totals, the graphs AND the listing.
   const paidRows = rows.filter((r) => r.paymentStatus === 'paid');
   const b2bTotal = Math.round(paidRows.reduce((s, r) => s + r.b2b, 0));
   const b2cTotal = Math.round(paidRows.reduce((s, r) => s + r.b2c, 0));
@@ -224,10 +227,10 @@ const tally = asyncHandler(async (req, res) => {
       b2b: b2bTotal,
       b2c: b2cTotal,
       difference: b2cTotal - b2bTotal,
-      bookings: rows.length,
+      bookings: totalCount,
       paidBookings: paidRows.length,
     },
-    rows,
+    rows: paidRows, // listing shows only paid bookings
     byActivity: Object.values(byActivity).map(round).sort((a, b) => b.b2c - a.b2c),
     byDate: Object.values(byDate).map(round).sort((a, b) => (a.date < b.date ? 1 : -1)),
   });
