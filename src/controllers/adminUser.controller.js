@@ -1,6 +1,8 @@
 const asyncHandler = require('express-async-handler');
 const { Op, fn, col, literal } = require('sequelize');
-const { User, Booking, WalletTransaction, Coupon } = require('../models');
+const {
+  User, Booking, WalletTransaction, Coupon, WishlistItem, Experience,
+} = require('../models');
 const { ok, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
 const { publicBooking } = require('./booking.controller');
@@ -213,6 +215,28 @@ const getById = asyncHandler(async (req, res) => {
     limit: 50,
   });
 
+  // Wishlist — resolve experience entities to a rich card (name/image/price);
+  // other entity types fall back to a generic label.
+  const wishlistRows = await WishlistItem.findAll({ where: { userId: id }, order: [['createdAt', 'DESC']], limit: 100 });
+  const wExpIds = wishlistRows.filter((w) => w.entityType === 'experience').map((w) => w.entityId);
+  const wExps = wExpIds.length
+    ? await Experience.findAll({ where: { id: { [Op.in]: wExpIds } }, attributes: ['id', 'name', 'mainImage', 'city', 'location', 'pricing', 'slug', 'status', 'isActive'] })
+    : [];
+  const wExpMap = new Map(wExps.map((e) => [e.id, e.toJSON()]));
+  const wishlist = wishlistRows.map((w) => {
+    const e = w.entityType === 'experience' ? wExpMap.get(w.entityId) : null;
+    return {
+      entityType: w.entityType,
+      entityId: w.entityId,
+      addedAt: w.createdAt,
+      name: e ? e.name : `${w.entityType} #${w.entityId}`,
+      image: e ? e.mainImage : null,
+      city: e ? (e.city || e.location) : null,
+      price: e && e.pricing ? (Number(e.pricing.adultPrice) || null) : null,
+      live: e ? (e.status === 'published' && e.isActive) : null,
+    };
+  });
+
   // Aggregates
   let totalSpentPaise = 0;
   let totalRefundPaise = 0;
@@ -315,6 +339,7 @@ const getById = asyncHandler(async (req, res) => {
       isProfileComplete: !!r.isProfileComplete,
     })),
     vouchers,
+    wishlist,
   });
 });
 

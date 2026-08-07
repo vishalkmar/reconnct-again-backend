@@ -352,11 +352,11 @@ const revenueAnalysis = asyncHandler(async (req, res) => {
   // ── Revenue trend (revenue / profit / previous-period revenue) ───────────
   const buckets = enumerate(start, end, interval);
   const prevBuckets = enumerate(prevStart, prevEnd, interval);
-  const trendMap = new Map(buckets.map((bk) => [bk, { revenue: 0, profit: 0 }]));
+  const trendMap = new Map(buckets.map((bk) => [bk, { revenue: 0, profit: 0, bookings: 0 }]));
   for (const b of scoped) {
     if (!statusMatch(b) || !PAID.includes(b.status) || !inWin(b, start, end)) continue;
     const slot = trendMap.get(bucketKey(revDate(b), interval));
-    if (slot) { slot.revenue += toR(b.totalPaise); slot.profit += toR(b.totalPaise - b.subtotalPaise); }
+    if (slot) { slot.revenue += toR(b.totalPaise); slot.profit += toR(b.totalPaise - b.subtotalPaise); slot.bookings += 1; }
   }
   const prevSeries = new Map(prevBuckets.map((bk) => [bk, 0]));
   for (const b of scoped) {
@@ -369,6 +369,7 @@ const revenueAnalysis = asyncHandler(async (req, res) => {
     bucket: bk,
     revenue: r0(trendMap.get(bk).revenue),
     profit: r0(trendMap.get(bk).profit),
+    bookings: trendMap.get(bk).bookings,
     prevRevenue: r0(prevVals[i] || 0),
   }));
 
