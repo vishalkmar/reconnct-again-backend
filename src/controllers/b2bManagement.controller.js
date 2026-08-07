@@ -4,6 +4,7 @@ const {
   Experience, Booking, Supplier, User, TeamMember, ExperienceCategory, ExperienceType,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
+const { withMarkup } = require('../utils/goLivePricing');
 
 /*
   Admin "B2B Management" — a command centre over every LIVE experience.
@@ -24,10 +25,11 @@ const toR = (paise) => Number(paise || 0) / 100;
 // column is the authoritative signal — there is no separate paymentStatus.
 const isPaid = (bk) => PAID.includes(bk.status);
 
-// The final per-adult price = base B2B + GST + convenience, less any %-discount.
+// The final per-adult price = base B2B + markup + GST + convenience, less any %-discount.
 const finalAdultPrice = (exp) => {
-  const base = Number(exp.pricing?.adultPrice) || 0;
-  if (base <= 0) return 0;
+  const raw = Number(exp.pricing?.adultPrice) || 0;
+  if (raw <= 0) return 0;
+  const base = withMarkup(raw, exp.markup); // markup applies first, on the base
   const disc = exp.discount;
   let d = 0;
   if (disc && disc.value) d = disc.type === 'percentage' ? (base * Number(disc.value)) / 100 : Number(disc.value) || 0;
@@ -150,6 +152,7 @@ const detail = asyncHandler(async (req, res) => {
       priceMethod: j.priceMethod,
       pricing: j.pricing || {}, // B2B base (adult + child bands)
       gstRate: j.gstRate || 0,
+      markup: j.markup || null,
       discount: j.discount || null,
       convenienceFee: j.convenienceFee || null,
       b2cPriceMethod: j.b2cPriceMethod,

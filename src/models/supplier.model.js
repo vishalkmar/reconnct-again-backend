@@ -23,6 +23,13 @@ const Supplier = sequelize.define(
     email: { type: DataTypes.STRING(200), allowNull: true },
     image: { type: DataTypes.STRING(500), allowNull: true },       // logo / photo (optional)
     b2bContract: { type: DataTypes.STRING(500), allowNull: true },  // uploaded contract URL (optional)
+    // Bank / settlement account — collected at onboarding so payouts to the
+    // supplier can be made. All mandatory on the create form.
+    bankAccountName: { type: DataTypes.STRING(240), allowNull: true },
+    bankName: { type: DataTypes.STRING(200), allowNull: true },
+    bankAddress: { type: DataTypes.STRING(400), allowNull: true },
+    accountNumber: { type: DataTypes.STRING(60), allowNull: true },
+    ifscCode: { type: DataTypes.STRING(40), allowNull: true },
     notes: { type: DataTypes.TEXT, allowNull: true },
     // FCM token for the supplier's device — set when they sign in on the app,
     // so booking/reminder pushes reach them on the lock screen even with the

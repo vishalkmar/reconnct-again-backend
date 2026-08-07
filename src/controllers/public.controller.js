@@ -34,13 +34,19 @@ const fromPrice = (exp) => {
   return bands.length ? Math.min(...bands) : 0;
 };
 
-// Normalised child age-bands for the detail page's pricing block.
+// Normalised child bands for the detail page's pricing block. Bands are keyed
+// by age (default) or height (cm) depending on the pricing's childMode.
 const childBands = (exp) => {
   const p = exp.pricing || {};
   if (!p.childrenEnabled || !Array.isArray(p.childBands)) return [];
+  const height = p.childMode === 'height';
   return p.childBands.map((b) => ({
+    // Always send both so the app can render the right label without a second field.
     startAge: Number(b.startAge) || 0,
     endAge: Number(b.endAge) || 0,
+    startHeight: Number(b.startHeight) || 0,
+    endHeight: Number(b.endHeight) || 0,
+    unit: height ? 'cm' : 'yr',
     charge: b.charge !== false && Number(b.price) > 0,
     price: Number(b.price) || 0,
   }));
@@ -120,6 +126,7 @@ const detailShape = async (exp) => {
     // missing this one purely because it was never sent.
     privacyPolicy: j.privacyPolicy || null,
     gstRate: j.gstRate || 0,
+    markup: j.markup || null,                // { type:'percentage'|'fixed', value }
     discount: j.discount || null,            // { type:'percentage'|'fixed', value }
     convenienceFee: j.convenienceFee || null, // { type:'free'|'fixed'|'percentage', value }
     priceMethod: j.priceMethod || 'per_person',

@@ -10,8 +10,20 @@ const applyGoLivePricing = (item, body = {}) => {
   if (body.priceMethod !== undefined && body.priceMethod) item.priceMethod = body.priceMethod;
   if (body.pricing !== undefined && body.pricing && typeof body.pricing === 'object') item.pricing = body.pricing;
   if (body.gstRate !== undefined) item.gstRate = Number(body.gstRate) || 0;
+  if (body.markup !== undefined) item.markup = body.markup || null;
   if (body.discount !== undefined) item.discount = body.discount || null;
   if (body.convenienceFee !== undefined) item.convenienceFee = body.convenienceFee || null;
 };
 
-module.exports = { applyGoLivePricing };
+// The markup amount (in the same unit as `base`) for a given markup config.
+const markupAmount = (base, markup) => {
+  const b = Number(base) || 0;
+  if (!markup || !markup.value) return 0;
+  return markup.type === 'fixed' ? (Number(markup.value) || 0) : (b * (Number(markup.value) || 0)) / 100;
+};
+
+// The effective per-unit base AFTER markup — this is what the booking actually
+// charges (GST etc. then apply on top), so markup is real revenue, not display.
+const withMarkup = (base, markup) => (Number(base) || 0) + markupAmount(base, markup);
+
+module.exports = { applyGoLivePricing, markupAmount, withMarkup };

@@ -14,6 +14,7 @@ const {
 } = require('../models');
 
 const { priceUnitLabel } = require('../config/priceType');
+const { withMarkup } = require('../utils/goLivePricing');
 
 const TAX_RATE = Number(process.env.BOOKING_TAX_RATE || 0.18); // 18% GST default
 const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'event_activity', 'experience'];
@@ -212,7 +213,8 @@ const fetchItem = async (type, id) => {
     if (!ex || ex.isActive === false || ex.status === 'archived') return null;
     const j = ex.toJSON();
     const pricing = j.pricing || {};
-    const price = Number(pricing.adultPrice || pricing.fromPrice || 0);
+    // Markup is a real margin added on the B2B base, so the booking charges it.
+    const price = withMarkup(Number(pricing.adultPrice || pricing.fromPrice || 0), j.markup);
     return {
       type: 'experience',
       id: j.id,

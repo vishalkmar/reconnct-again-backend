@@ -34,13 +34,59 @@ const typeLabel = (t) => ({
   experience: 'Experience',
 })[t] || 'Booking';
 
+const stripHtml = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/\s+/g, ' ').trim();
+const inclusionLines = (inc) => (Array.isArray(inc) ? inc : [])
+  .map((x) => (typeof x === 'string' ? x : (x && (x.title || x.text)) || ''))
+  .map(stripHtml).filter(Boolean).slice(0, 12);
+
+// Rich experience details for the voucher (about / inclusions / cover). Only
+// applies to experience bookings; returns null otherwise so callers can skip.
+const expExtras = async (booking) => {
+  if (!booking || booking.itemType !== 'experience') return null;
+  try {
+    const { Experience } = require('../models');
+    const exp = await Experience.findByPk(booking.itemId);
+    if (!exp) return null;
+    const j = exp.toJSON();
+    return {
+      about: stripHtml(j.about).slice(0, 700),
+      inclusions: inclusionLines(j.inclusions),
+      image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || (booking.itemSnapshot || {}).image || null,
+      gallery: (Array.isArray(j.gallery) ? j.gallery : []).slice(0, 4),
+      durationLabel: (j.pricing && j.pricing.durationLabel) || (j.data && j.data.durationLabel) || null,
+    };
+  } catch { return null; }
+};
+
+// About + What's-included blocks shared by the guest & supplier vouchers.
+const detailBlocks = (extras) => {
+  if (!extras) return '';
+  const about = extras.about ? `
+    <div style="margin-top:18px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:6px;">About this experience</div>
+      <div style="font-size:13px;color:#374151;line-height:1.6;">${escape(extras.about)}</div>
+    </div>` : '';
+  const incl = extras.inclusions && extras.inclusions.length ? `
+    <div style="margin-top:16px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:6px;">What's included</div>
+      <ul style="margin:0;padding-left:18px;font-size:13px;color:#374151;line-height:1.7;">
+        ${extras.inclusions.map((i) => `<li>${escape(i)}</li>`).join('')}
+      </ul>
+    </div>` : '';
+  const gallery = extras.gallery && extras.gallery.length > 1 ? `
+    <div style="margin-top:16px;font-size:0;">
+      ${extras.gallery.map((g) => `<img src="${escape(g)}" alt="" style="width:24%;height:70px;object-fit:cover;border-radius:8px;margin-right:1%;" />`).join('')}
+    </div>` : '';
+  return about + incl + gallery;
+};
+
 /**
  * Build the voucher HTML embedded in the confirmation email. Renders through
  * the shared emailShell so it looks consistent with every other reconnct
  * email (inline styles only — no external CSS — so it renders identically
  * across Gmail, Outlook, Apple Mail and the Brevo preview).
  */
-const buildVoucherHtml = (booking) => {
+const buildVoucherHtml = (booking, extras = null) => {
   const item = booking.itemSnapshot || {};
   const scheduleLine = booking.scheduledEndAt
     ? `${fmtDate(booking.scheduledFor)} → ${fmtDate(booking.scheduledEndAt)}`
@@ -63,13 +109,16 @@ const buildVoucherHtml = (booking) => {
   if (booking.walletDiscountPaise > 0) pricingRows.push(['Wallet credit', `− ${fmtMoney(booking.walletDiscountPaise, booking.currency)}`]);
   if (booking.couponDiscountPaise > 0) pricingRows.push([`Coupon ${booking.couponCode || ''}`.trim(), `− ${fmtMoney(booking.couponDiscountPaise, booking.currency)}`]);
 
+  const cover = (extras && extras.image) || item.image;
   const bodyHtml = `
-    ${item.image ? `<img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
+    ${cover ? `<img src="${escape(cover)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#b45309;">${escape(typeLabel(booking.itemType))}</div>
     <div style="font-size:20px;font-weight:800;color:#101828;margin:4px 0 4px;line-height:1.3;">${escape(item.name || 'Booking')}</div>
     ${item.location ? `<div style="font-size:13px;color:#64748b;margin-bottom:16px;">📍 ${escape(item.location)}</div>` : '<div style="margin-bottom:8px;"></div>'}
 
     ${kvTable(rows)}
+
+    ${detailBlocks(extras)}
 
     <div style="margin-top:20px;padding-top:16px;border-top:1px solid #eef1f5;">
       <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#64748b;margin-bottom:10px;">Payment summary</div>
@@ -100,7 +149,8 @@ const buildVoucherHtml = (booking) => {
 
 const sendBookingConfirmation = async ({ booking }) => {
   if (!booking?.guestEmail) return;
-  const html = buildVoucherHtml(booking);
+  const extras = await expExtras(booking);
+  const html = buildVoucherHtml(booking, extras);
   const subject = `Booking confirmed: ${booking.itemSnapshot?.name || 'Your booking'} (${booking.bookingCode})`;
   const text = [
     `Booking confirmed — ${booking.bookingCode}`,
@@ -114,7 +164,7 @@ const sendBookingConfirmation = async ({ booking }) => {
   // the confirmation email itself from going out.
   let attachments;
   try {
-    const pdf = await buildBookingVoucherPdf(booking);
+    const pdf = await buildBookingVoucherPdf(booking, { extras });
     attachments = [{ filename: `voucher-${booking.bookingCode}.pdf`, content: pdf }];
   } catch (err) {
     console.error('[bookingEmail] voucher PDF generation failed:', err.message);
@@ -145,15 +195,23 @@ const buildHostVoucherHtml = (booking, exp) => {
   ];
   if (booking.specialRequests) rows.push(['Special requests', escape(booking.specialRequests)]);
 
+  const cover = exp.mainImage || item.image;
+  const extras = {
+    about: stripHtml(exp.about).slice(0, 700),
+    inclusions: inclusionLines(exp.inclusions),
+    gallery: (Array.isArray(exp.gallery) ? exp.gallery : []).slice(0, 4),
+  };
   const bodyHtml = `
-    ${item.image ? `<img src="${escape(item.image)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
+    ${cover ? `<img src="${escape(cover)}" alt="" style="width:100%;max-height:220px;object-fit:cover;border-radius:10px;margin-bottom:16px;" />` : ''}
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:#b45309;">Experience</div>
     <div style="font-size:20px;font-weight:800;color:#101828;margin:4px 0 16px;line-height:1.3;">${escape(exp.name)}</div>
 
     ${kvTable(rows)}
 
+    ${detailBlocks(extras)}
+
     <div style="margin-top:20px;">
-      ${calloutBox('Base amount', baseAmount, 'Excludes GST and platform convenience fee.')}
+      ${calloutBox('Base amount (B2B)', baseAmount, 'Your payout basis — excludes GST, markup, discount & platform convenience fee.')}
     </div>
   `;
 
@@ -177,6 +235,7 @@ const notifyHostOfBooking = async ({ booking }) => {
   const { Experience, User, Supplier } = require('../models');
   const exp = await Experience.findByPk(booking.itemId);
   if (!exp) return;
+  const hostExtras = { image: exp.mainImage, about: stripHtml(exp.about).slice(0, 700), inclusions: inclusionLines(exp.inclusions) };
 
   // A listing is owned by EITHER a "Switch to Host" User (ownerUserId) OR a
   // Supplier (supplierId). Both should hear about a new booking — previously
@@ -194,7 +253,7 @@ const notifyHostOfBooking = async ({ booking }) => {
       const text = `New booking on ${exp.name} (${booking.bookingCode}) — guest ${booking.guestName || 'Guest'} (${booking.guestEmail || ''}, ${booking.guestPhone || ''}), base amount ${fmtMoney(booking.subtotalPaise, booking.currency)}.`;
       let att;
       try {
-        const pdf = await buildBookingVoucherPdf(booking, { hostView: true });
+        const pdf = await buildBookingVoucherPdf(booking, { hostView: true, extras: hostExtras });
         att = [{ filename: `voucher-${booking.bookingCode}.pdf`, content: pdf }];
       } catch { /* voucher optional */ }
       await send({ to: sup.email, subject, html, text, attachments: att }).catch(() => {});
@@ -219,7 +278,7 @@ const notifyHostOfBooking = async ({ booking }) => {
 
   let attachments;
   try {
-    const pdf = await buildBookingVoucherPdf(booking, { hostView: true });
+    const pdf = await buildBookingVoucherPdf(booking, { hostView: true, extras: hostExtras });
     attachments = [{ filename: `host-voucher-${booking.bookingCode}.pdf`, content: pdf }];
   } catch (err) {
     console.error('[bookingEmail] host voucher PDF generation failed:', err.message);

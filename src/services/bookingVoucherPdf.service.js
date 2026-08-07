@@ -53,6 +53,33 @@ const typeLabel = (t) => ({
   addon: 'Add-on Activity', experience: 'Experience', event_activity: 'Activity',
 })[t] || 'Booking';
 
+// Fetch + embed a cover image. pdf-lib only supports PNG/JPG, so anything else
+// (webp, etc.) or a fetch failure is skipped silently — the voucher still
+// renders, just without the photo.
+const embedCover = async (pdf, url) => {
+  if (!url || !/^https?:\/\//i.test(url)) return null;
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const buf = Buffer.from(await res.arrayBuffer());
+    if (buf[0] === 0x89 && buf[1] === 0x50) return await pdf.embedPng(buf);
+    if (buf[0] === 0xff && buf[1] === 0xd8) return await pdf.embedJpg(buf);
+    return null;
+  } catch { return null; }
+};
+
+// Greedy word-wrap → array of lines that each fit within maxW.
+const wrapLines = (str, font, size, maxW) => {
+  const words = sanitizeText(str).split(/\s+/).filter(Boolean);
+  const lines = []; let cur = '';
+  for (const w of words) {
+    const test = cur ? `${cur} ${w}` : w;
+    if (font.widthOfTextAtSize(test, size) > maxW && cur) { lines.push(cur); cur = w; } else cur = test;
+  }
+  if (cur) lines.push(cur);
+  return lines;
+};
+
 /**
  * Build a single-page PDF voucher for a booking. `booking` is the raw
  * Sequelize row (or its .toJSON()) — reads the same paise/JSON columns the
@@ -64,6 +91,7 @@ const typeLabel = (t) => ({
  */
 const buildBookingVoucherPdf = async (bookingRow, opts = {}) => {
   const hostView = !!opts.hostView;
+  const extras = opts.extras || null;
   const b = bookingRow.toJSON ? bookingRow.toJSON() : bookingRow;
   const item = b.itemSnapshot || {};
   const currency = b.currency || 'INR';
@@ -83,7 +111,17 @@ const buildBookingVoucherPdf = async (bookingRow, opts = {}) => {
   text(String(b.bookingCode || ''), PAGE_W - MR - 180, PAGE_H - 42, { size: 16, bold: true, color: WHITE });
   text((b.status || '').toUpperCase(), PAGE_W - MR - 180, PAGE_H - 62, { size: 10, color: WHITE });
 
-  let y = PAGE_H - 130;
+  let y = PAGE_H - 112;
+
+  // ── Cover photo (optional) ───────────────────────────────────────────
+  const cover = await embedCover(pdf, (extras && extras.image) || item.image);
+  if (cover) {
+    const h = Math.min(150, (cover.height * CW) / cover.width);
+    page.drawImage(cover, { x: ML, y: y - h, width: CW, height: h });
+    y -= h + 18;
+  } else {
+    y -= 18;
+  }
 
   // ── Item ─────────────────────────────────────────────────────────────
   text(typeLabel(b.itemType).toUpperCase(), ML, y, { size: 9, bold: true, color: BRAND });
@@ -175,6 +213,25 @@ const buildBookingVoucherPdf = async (bookingRow, opts = {}) => {
     text(totalLabel, ML + 12, py, { size: 12, bold: true });
     const totalStr = fmtMoney(b.totalPaise, currency);
     text(totalStr, PAGE_W - MR - 12 - bold.widthOfTextAtSize(sanitizeText(totalStr), 14), py, { size: 14, bold: true, color: rgb(0.06, 0.46, 0.43) });
+  }
+
+  // ── About + What's included (experiences, space permitting) ──────────
+  if (extras && (extras.about || (extras.inclusions && extras.inclusions.length))) {
+    y -= 8; line(y); y -= 22;
+    if (extras.about && y > 150) {
+      text('ABOUT', ML, y, { size: 9, bold: true, color: MUTE }); y -= 16;
+      const lines = wrapLines(extras.about, helv, 10, CW).slice(0, 5);
+      for (const ln of lines) { if (y < 120) break; text(ln, ML, y, { size: 10, color: INK }); y -= 14; }
+      y -= 8;
+    }
+    if (extras.inclusions && extras.inclusions.length && y > 130) {
+      text("WHAT'S INCLUDED", ML, y, { size: 9, bold: true, color: MUTE }); y -= 16;
+      for (const inc of extras.inclusions.slice(0, 6)) {
+        if (y < 110) break;
+        const ln = wrapLines(`- ${inc}`, helv, 10, CW)[0];
+        text(ln, ML, y, { size: 10, color: INK }); y -= 14;
+      }
+    }
   }
 
   // ── Footer ───────────────────────────────────────────────────────────

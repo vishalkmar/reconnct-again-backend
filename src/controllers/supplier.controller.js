@@ -5,7 +5,8 @@ const { ok, created, fail } = require('../utils/response');
 const { generatePassword, sendSupplierWelcome } = require('../services/supplierWelcome.service');
 
 // `notes` deliberately dropped — the field was removed from the onboarding form.
-const WRITABLE = ['companyName', 'supplierName', 'phone', 'email', 'image', 'b2bContract', 'isActive', 'sortOrder'];
+const WRITABLE = ['companyName', 'supplierName', 'phone', 'email', 'image', 'b2bContract', 'isActive', 'sortOrder',
+  'bankAccountName', 'bankName', 'bankAddress', 'accountNumber', 'ifscCode'];
 
 const pickWritable = (body) => {
   const out = {};
@@ -43,6 +44,12 @@ const create = asyncHandler(async (req, res) => {
   if (!need(data.supplierName)) return fail(res, 'Supplier name is required', 400);
   if (!need(data.phone)) return fail(res, 'Phone is required', 400);
   if (!need(data.email)) return fail(res, 'Email is required — the supplier logs in with it', 400);
+  // Bank / settlement account is mandatory at onboarding.
+  if (!need(data.bankAccountName)) return fail(res, 'Account name is required', 400);
+  if (!need(data.bankName)) return fail(res, 'Bank name is required', 400);
+  if (!need(data.bankAddress)) return fail(res, 'Bank address is required', 400);
+  if (!need(data.accountNumber)) return fail(res, 'Account number is required', 400);
+  if (!need(data.ifscCode)) return fail(res, 'IFSC code is required', 400);
 
   // Email IS the supplier's login (supplierAuth lower-cases it on the way in),
   // so it must be unique — store it normalised and reject a duplicate up front

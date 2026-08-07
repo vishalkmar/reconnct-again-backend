@@ -119,6 +119,9 @@ const Experience = sequelize.define(
 
     // ── Tax & discount (GST task) ────────────────────────────────────────
     gstRate: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 }, // 0/5/12/18/28
+    // Markup — a margin COPS adds ON the B2B base at go-live, applied BEFORE
+    // discount. { type:'percentage'|'fixed', value }
+    markup: { type: DataTypes.JSON, allowNull: true },
     discount: { type: DataTypes.JSON, allowNull: true }, // { type:'percentage'|'fixed', value }
     // Convenience fee — applied on the FINAL amount (net + GST), after discount.
     // { type:'free'|'fixed'|'percentage', value, months, cutThrough }

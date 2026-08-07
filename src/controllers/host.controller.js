@@ -218,6 +218,7 @@ const mapFormToExperience = (form = {}) => {
     pricing: {
       adultPrice: Number(form.adultPrice) || 0, // B2B — the working price
       childrenEnabled: !!form.childrenEnabled,
+      childMode: form.childMode === 'height' ? 'height' : 'age',
       childBands: Array.isArray(form.childBands) ? form.childBands : [],
       capacity: Number(form.capacity) || 0,
       durationHours: Number(form.durationHours) || 0,
@@ -228,6 +229,7 @@ const mapFormToExperience = (form = {}) => {
     b2cPricing: {
       adultPrice: Number(form.b2cAdultPrice) || 0,
       childrenEnabled: !!form.b2cChildrenEnabled,
+      childMode: form.b2cChildMode === 'height' ? 'height' : 'age',
       childBands: Array.isArray(form.b2cChildBands) ? form.b2cChildBands : [],
     },
     sourceName: form.sourceName || null,
@@ -347,6 +349,7 @@ const toHostForm = (exp) => {
     priceMethod: j.priceMethod || 'per_person',
     adultPrice: p.adultPrice ? String(p.adultPrice) : '',
     childrenEnabled: !!p.childrenEnabled,
+    childMode: p.childMode === 'height' ? 'height' : 'age',
     childBands: p.childBands || [],
     capacity: p.capacity || 8,
     durationHours: p.durationHours || 0,
@@ -355,6 +358,7 @@ const toHostForm = (exp) => {
     b2cPriceMethod: j.b2cPriceMethod || 'per_person',
     b2cAdultPrice: b2c.adultPrice ? String(b2c.adultPrice) : '',
     b2cChildrenEnabled: !!b2c.childrenEnabled,
+    b2cChildMode: b2c.childMode === 'height' ? 'height' : 'age',
     b2cChildBands: b2c.childBands || [],
     sourceName: j.sourceName || '',
     sourceLink: j.sourceLink || '',
