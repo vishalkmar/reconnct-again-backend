@@ -409,7 +409,23 @@ const voucherPdf = asyncHandler(async (req, res) => {
   });
   if (!booking) return fail(res, 'Booking not found', 404);
 
-  const pdf = await buildBookingVoucherPdf(booking);
+  // Rich cover / about / inclusions for experience bookings (same as the email).
+  let extras;
+  if (booking.itemType === 'experience') {
+    try {
+      const { Experience } = require('../models');
+      const exp = await Experience.findByPk(booking.itemId);
+      if (exp) {
+        const j = exp.toJSON();
+        const strip = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const incl = (Array.isArray(j.inclusions) ? j.inclusions : [])
+          .map((x) => (typeof x === 'string' ? x : (x && (x.title || x.text)) || '')).map(strip).filter(Boolean).slice(0, 8);
+        extras = { image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || null, about: strip(j.about).slice(0, 700), inclusions: incl };
+      }
+    } catch { /* extras are optional */ }
+  }
+
+  const pdf = await buildBookingVoucherPdf(booking, { extras });
   res.setHeader('Content-Type', 'application/pdf');
   res.setHeader('Content-Disposition', `attachment; filename="voucher-${booking.bookingCode}.pdf"`);
   return res.send(pdf);
