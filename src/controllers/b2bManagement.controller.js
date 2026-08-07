@@ -1,7 +1,7 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const {
-  Experience, Booking, Supplier, User, TeamMember,
+  Experience, Booking, Supplier, User, TeamMember, ExperienceCategory, ExperienceType,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 
@@ -18,6 +18,11 @@ const { ok, fail } = require('../utils/response');
 */
 const PAID = ['confirmed', 'completed'];
 const toR = (paise) => Number(paise || 0) / 100;
+
+// A booking is "paid" only when its payment actually completed — the
+// paymentStatus column is authoritative; a confirmed/completed booking status
+// is accepted as a fallback for legacy rows that predate paymentStatus.
+const isPaid = (bk) => bk.paymentStatus === 'completed' || PAID.includes(bk.status);
 
 // The final per-adult price = base B2B + GST + convenience, less any %-discount.
 const finalAdultPrice = (exp) => {
@@ -39,7 +44,7 @@ const revenueOf = (bookings) => {
   let b2b = 0; let b2c = 0; let count = 0; let paid = 0;
   for (const bk of bookings) {
     count += 1;
-    if (PAID.includes(bk.status)) {
+    if (isPaid(bk)) {
       paid += 1;
       b2b += toR(bk.subtotalPaise);
       b2c += toR(bk.totalPaise);
@@ -80,7 +85,7 @@ const bookingRow = (bk) => ({
   bookedAt: bk.createdAt,
   paidAt: bk.paidAt,
   status: bk.status,
-  paymentStatus: PAID.includes(bk.status) ? 'paid' : (bk.status === 'pending_payment' ? 'pending' : bk.status),
+  paymentStatus: isPaid(bk) ? 'paid' : (bk.status === 'cancelled' ? 'cancelled' : 'pending'),
   b2b: toR(bk.subtotalPaise), // base
   b2c: toR(bk.totalPaise), // final (customer paid)
   difference: toR(bk.totalPaise) - toR(bk.subtotalPaise),
@@ -96,7 +101,7 @@ const listLive = asyncHandler(async (req, res) => {
   });
   const ids = rows.map((r) => r.id);
   const bks = ids.length
-    ? await Booking.findAll({ where: { itemType: 'experience', itemId: { [Op.in]: ids } }, attributes: ['itemId', 'status', 'subtotalPaise', 'totalPaise'] })
+    ? await Booking.findAll({ where: { itemType: 'experience', itemId: { [Op.in]: ids } }, attributes: ['itemId', 'status', 'paymentStatus', 'subtotalPaise', 'totalPaise'] })
     : [];
   const byExp = new Map();
   bks.forEach((bk) => { const a = byExp.get(bk.itemId) || []; a.push(bk); byExp.set(bk.itemId, a); });
@@ -121,14 +126,18 @@ const listLive = asyncHandler(async (req, res) => {
 // GET /api/admin/b2b/experiences/:id — full command centre for one live experience.
 const detail = asyncHandler(async (req, res) => {
   const exp = await Experience.findByPk(req.params.id, {
-    include: [{ model: Supplier, as: 'supplier' }],
+    include: [
+      { model: Supplier, as: 'supplier' },
+      { model: ExperienceCategory, as: 'category', attributes: ['id', 'name'] },
+      { model: ExperienceType, as: 'type', attributes: ['id', 'name'] },
+    ],
   });
   if (!exp) return fail(res, 'Experience not found', 404);
   const j = exp.toJSON();
   const kam = await kamFor(exp);
   const bookings = await Booking.findAll({
     where: { itemType: 'experience', itemId: exp.id },
-    attributes: ['id', 'bookingCode', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paidAt', 'scheduledFor', 'createdAt'],
+    attributes: ['id', 'bookingCode', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paymentStatus', 'paidAt', 'scheduledFor', 'createdAt'],
     order: [['createdAt', 'DESC']],
   });
   const rev = revenueOf(bookings);
@@ -178,7 +187,7 @@ const tally = asyncHandler(async (req, res) => {
 
   const bookings = await Booking.findAll({
     where,
-    attributes: ['id', 'bookingCode', 'itemId', 'itemSnapshot', 'guestName', 'guestEmail', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paidAt', 'scheduledFor', 'createdAt'],
+    attributes: ['id', 'bookingCode', 'itemId', 'itemSnapshot', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paymentStatus', 'paidAt', 'scheduledFor', 'createdAt'],
     order: [['createdAt', 'DESC']],
   });
 
