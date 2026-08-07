@@ -1,6 +1,8 @@
 const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
-const { Booking, User } = require('../models');
+const {
+  Booking, User, Experience, ExperienceCategory,
+} = require('../models');
 const { ok, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
 const { publicBooking } = require('./booking.controller');
@@ -58,13 +60,38 @@ const searchConditions = (req) => {
 // page, limit. Newest first.
 const list = asyncHandler(async (req, res) => {
   const base = searchConditions(req);
+
+  // Payment-date range (the Transactions ledger filters on when money moved,
+  // not the experience date).
+  if (req.query.paidFrom || req.query.paidTo) {
+    base.paidAt = base.paidAt || {};
+    if (req.query.paidFrom) base.paidAt[Op.gte] = new Date(`${req.query.paidFrom}T00:00:00`);
+    if (req.query.paidTo) base.paidAt[Op.lte] = new Date(`${req.query.paidTo}T23:59:59`);
+  }
+  // Amount range (rupees → paise).
+  if (req.query.priceMin || req.query.priceMax) {
+    base.totalPaise = {};
+    if (req.query.priceMin) base.totalPaise[Op.gte] = Math.round(Number(req.query.priceMin) * 100);
+    if (req.query.priceMax) base.totalPaise[Op.lte] = Math.round(Number(req.query.priceMax) * 100);
+  }
+  // Activity filter — one specific experience.
+  if (req.query.itemId) { base.itemType = 'experience'; base.itemId = Number(req.query.itemId); }
+  // Category filter — resolve the category's experiences, then scope to them.
+  if (req.query.category) {
+    const cat = await ExperienceCategory.findOne({ where: { name: String(req.query.category) }, attributes: ['id'] });
+    let ids = [];
+    if (cat) { const exps = await Experience.findAll({ where: { categoryId: cat.id }, attributes: ['id'] }); ids = exps.map((e) => e.id); }
+    base.itemType = 'experience';
+    base.itemId = ids.length ? { [Op.in]: ids } : { [Op.in]: [-1] };
+  }
+
   const where = { ...base };
   if (req.query.status) where.status = String(req.query.status);
 
   // Optional "paid only" mode for the Transactions page on the admin side —
   // saves the client from re-filtering after fetching everything.
   if (req.query.paidOnly === 'true') {
-    where.paidAt = { [Op.ne]: null };
+    where.paidAt = { ...(where.paidAt || {}), [Op.ne]: null };
   }
 
   const page = Math.max(1, parseInt(req.query.page, 10) || 1);
@@ -99,8 +126,11 @@ const list = asyncHandler(async (req, res) => {
   // Pending payment — computed on the same search/date/type filters but WITHOUT
   // the paidOnly gate, so the Transactions page (which always queries
   // paidOnly=true) can still show "how much is pending" alongside its paid ledger.
+  // Pending has no payment date, so drop the paidAt window (keep the other
+  // filters — search / category / activity / amount).
+  const pendingBase = { ...base }; delete pendingBase.paidAt;
   const pendingRows = await Booking.findAll({
-    where: { ...base, status: 'pending_payment' },
+    where: { ...pendingBase, status: 'pending_payment' },
     attributes: ['totalPaise'],
   });
   const pendingCount = pendingRows.length;

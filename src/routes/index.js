@@ -11,6 +11,7 @@ router.use('/notifications', require('./notification.routes'));
 router.use('/bookings', require('./booking.routes'));
 router.use('/payments', require('./payment.routes'));
 router.use('/refer-earn', require('./referEarn.routes'));
+router.use('/admin/dashboard', require('./adminDashboard.routes'));
 router.use('/admin/bookings', require('./adminBooking.routes'));
 router.use('/admin/users', require('./adminUser.routes'));
 router.use('/admin/notifications', require('./adminNotification.routes'));
