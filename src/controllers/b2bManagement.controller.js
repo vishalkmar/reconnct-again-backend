@@ -19,10 +19,10 @@ const { ok, fail } = require('../utils/response');
 const PAID = ['confirmed', 'completed'];
 const toR = (paise) => Number(paise || 0) / 100;
 
-// A booking is "paid" only when its payment actually completed — the
-// paymentStatus column is authoritative; a confirmed/completed booking status
-// is accepted as a fallback for legacy rows that predate paymentStatus.
-const isPaid = (bk) => bk.paymentStatus === 'completed' || PAID.includes(bk.status);
+// A booking is "paid" once its lifecycle status reaches confirmed/completed
+// (pending_payment / cancelled / refunded are not paid). The booking `status`
+// column is the authoritative signal — there is no separate paymentStatus.
+const isPaid = (bk) => PAID.includes(bk.status);
 
 // The final per-adult price = base B2B + GST + convenience, less any %-discount.
 const finalAdultPrice = (exp) => {
@@ -101,7 +101,7 @@ const listLive = asyncHandler(async (req, res) => {
   });
   const ids = rows.map((r) => r.id);
   const bks = ids.length
-    ? await Booking.findAll({ where: { itemType: 'experience', itemId: { [Op.in]: ids } }, attributes: ['itemId', 'status', 'paymentStatus', 'subtotalPaise', 'totalPaise'] })
+    ? await Booking.findAll({ where: { itemType: 'experience', itemId: { [Op.in]: ids } }, attributes: ['itemId', 'status', 'subtotalPaise', 'totalPaise'] })
     : [];
   const byExp = new Map();
   bks.forEach((bk) => { const a = byExp.get(bk.itemId) || []; a.push(bk); byExp.set(bk.itemId, a); });
@@ -137,7 +137,7 @@ const detail = asyncHandler(async (req, res) => {
   const kam = await kamFor(exp);
   const bookings = await Booking.findAll({
     where: { itemType: 'experience', itemId: exp.id },
-    attributes: ['id', 'bookingCode', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paymentStatus', 'paidAt', 'scheduledFor', 'createdAt'],
+    attributes: ['id', 'bookingCode', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paidAt', 'scheduledFor', 'createdAt'],
     order: [['createdAt', 'DESC']],
   });
   const rev = revenueOf(bookings);
@@ -187,7 +187,7 @@ const tally = asyncHandler(async (req, res) => {
 
   const bookings = await Booking.findAll({
     where,
-    attributes: ['id', 'bookingCode', 'itemId', 'itemSnapshot', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paymentStatus', 'paidAt', 'scheduledFor', 'createdAt'],
+    attributes: ['id', 'bookingCode', 'itemId', 'itemSnapshot', 'guestName', 'guestEmail', 'guestPhone', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paidAt', 'scheduledFor', 'createdAt'],
     order: [['createdAt', 'DESC']],
   });
 
