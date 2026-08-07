@@ -586,10 +586,42 @@ const revenueAnalysis = asyncHandler(async (req, res) => {
       profit: r0(toR(b.totalPaise - b.subtotalPaise)),
     }));
 
+  // ── Participants split (solo / couple / group) — real, from guestCount ───
+  const paidWin = scoped.filter((b) => statusMatch(b) && PAID.includes(b.status) && inWin(b, start, end));
+  let pTotal = 0; let solo = 0; let couple = 0; let grp = 0;
+  paidWin.forEach((b) => { const g = Number(b.guestCount || 1); pTotal += g; if (g <= 1) solo += 1; else if (g === 2) couple += 1; else grp += 1; });
+  const pc = paidWin.length || 1;
+  const participants = {
+    total: pTotal, avg: pct1(pTotal / pc), solo, couple, group: grp,
+    soloPct: pct1((solo / pc) * 100), couplePct: pct1((couple / pc) * 100), groupPct: pct1((grp / pc) * 100),
+  };
+
+  // ── Booking status counts (created in window) ────────────────────────────
+  const statusCounts = { confirmed: 0, completed: 0, cancelled: 0, refunded: 0, pending: 0 };
+  winCreated.forEach((b) => { if (b.status === 'pending_payment') statusCounts.pending += 1; else if (statusCounts[b.status] != null) statusCounts[b.status] += 1; });
+
+  // ── Peak performance (best weekday / best single date) ───────────────────
+  const WD = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const wdRev = new Map(); const dRev = new Map();
+  paidWin.forEach((b) => {
+    const dt = new Date(revDate(b));
+    wdRev.set(dt.getDay(), (wdRev.get(dt.getDay()) || 0) + toR(b.totalPaise));
+    const dk = dstr(dt); dRev.set(dk, (dRev.get(dk) || 0) + toR(b.totalPaise));
+  });
+  const bestWd = [...wdRev.entries()].sort((a, b) => b[1] - a[1])[0];
+  const bestD = [...dRev.entries()].sort((a, b) => b[1] - a[1])[0];
+  const peak = {
+    bestDay: bestWd ? { label: WD[bestWd[0]], revenue: r0(bestWd[1]) } : null,
+    bestDate: bestD ? { date: bestD[0], revenue: r0(bestD[1]) } : null,
+  };
+
   return ok(res, {
     range: { start: dstr(start), end: dstr(end), interval },
     filters: universes,
     kpis: { ...kpis, prev: prevKpis, delta: deltas },
+    participants,
+    statusCounts,
+    peak,
     trend,
     topExperiences,
     lowExperiences,
