@@ -157,6 +157,27 @@ const getBooking = asyncHandler(async (req, res) => {
   });
 });
 
+// GET /api/{host|supplier}/bookings/:id/voucher.pdf — the owner's copy of the
+// voucher (hostView = B2B base amount, never the live/B2C price the guest paid).
+// Same document that's attached to their "new booking" email.
+const bookingVoucherPdf = asyncHandler(async (req, res) => {
+  const booking = await Booking.findByPk(req.params.id);
+  if (!booking || booking.itemType !== 'experience') return fail(res, 'Booking not found', 404);
+  const exp = await Experience.findOne({ where: { id: booking.itemId, ...ownerWhere(req) } });
+  if (!exp) return fail(res, 'Booking not found', 404);
+
+  const { buildBookingVoucherPdf } = require('../services/bookingVoucherPdf.service');
+  const j = exp.toJSON();
+  const strip = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+  const incl = (Array.isArray(j.inclusions) ? j.inclusions : [])
+    .map((x) => (typeof x === 'string' ? x : (x && (x.title || x.text)) || '')).map(strip).filter(Boolean).slice(0, 8);
+  const extras = { image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || null, about: strip(j.about).slice(0, 700), inclusions: incl };
+  const pdf = await buildBookingVoucherPdf(booking, { hostView: true, extras });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="voucher-${booking.bookingCode}.pdf"`);
+  return res.send(pdf);
+});
+
 /*
   Host ("Switch to Host") API. A host listing IS an Experience whose
   ownerUserId is the signed-in user. Both the mobile app and the website submit
@@ -707,7 +728,7 @@ const allBookings = asyncHandler(async (req, res) => {
 });
 
 module.exports = {
-  listMine, getMine, createMine, updateMine, removeMine, summary, getBooking, listTransactions,
+  listMine, getMine, createMine, updateMine, removeMine, summary, getBooking, bookingVoucherPdf, listTransactions,
   allBookings,
   upAckMine,
 };

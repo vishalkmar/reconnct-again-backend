@@ -7,6 +7,7 @@ const { authenticate } = require('../middlewares/auth.middleware');
 router.use(authenticate);
 
 router.get('/', ctrl.list);
+router.get('/:code/voucher.pdf', ctrl.voucherPdf);
 router.get('/:code', ctrl.getByCode);
 router.post('/:code/mark-completed', ctrl.markCompleted);
 

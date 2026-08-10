@@ -178,4 +178,29 @@ const markCompleted = asyncHandler(async (req, res) => {
   return ok(res, { booking: adminBookingShape(booking) }, 'Booking marked completed');
 });
 
-module.exports = { list, getByCode, markCompleted };
+// GET /api/admin/bookings/:code/voucher.pdf — the exact guest voucher PDF
+// (same one emailed on confirmation), downloadable from the admin bookings UI.
+const voucherPdf = asyncHandler(async (req, res) => {
+  const booking = await Booking.findOne({ where: { bookingCode: String(req.params.code) } });
+  if (!booking) return fail(res, 'Booking not found', 404);
+  const { buildBookingVoucherPdf } = require('../services/bookingVoucherPdf.service');
+  let extras;
+  if (booking.itemType === 'experience') {
+    try {
+      const exp = await Experience.findByPk(booking.itemId);
+      if (exp) {
+        const j = exp.toJSON();
+        const strip = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        const incl = (Array.isArray(j.inclusions) ? j.inclusions : [])
+          .map((x) => (typeof x === 'string' ? x : (x && (x.title || x.text)) || '')).map(strip).filter(Boolean).slice(0, 8);
+        extras = { image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || null, about: strip(j.about).slice(0, 700), inclusions: incl };
+      }
+    } catch { /* optional */ }
+  }
+  const pdf = await buildBookingVoucherPdf(booking, { extras });
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="voucher-${booking.bookingCode}.pdf"`);
+  return res.send(pdf);
+});
+
+module.exports = { list, getByCode, markCompleted, voucherPdf };

@@ -248,4 +248,76 @@ const tally = asyncHandler(async (req, res) => {
   });
 });
 
-module.exports = { listLive, detail, tally };
+// GET /api/admin/b2b/supplier-revenue — per-supplier B2B vs B2C rollup over all
+// PAID experience bookings. B2B = base (subtotalPaise), B2C = final paid
+// (totalPaise); Difference = B2C − B2B.
+const supplierRevenue = asyncHandler(async (req, res) => {
+  const bookings = await Booking.findAll({
+    where: { itemType: 'experience' },
+    attributes: ['itemId', 'status', 'subtotalPaise', 'totalPaise'],
+  });
+  const expIds = [...new Set(bookings.map((b) => b.itemId))];
+  const exps = expIds.length
+    ? await Experience.findAll({ where: { id: { [Op.in]: expIds } }, attributes: ['id', 'supplierId'] })
+    : [];
+  const expSup = new Map(exps.map((e) => [e.id, e.supplierId]));
+
+  const bySup = new Map();
+  for (const b of bookings) {
+    if (!isPaid(b)) continue;
+    const sid = expSup.get(b.itemId);
+    if (!sid) continue;
+    const r = bySup.get(sid) || { supplierId: sid, b2b: 0, b2c: 0, bookings: 0 };
+    r.b2b += toR(b.subtotalPaise); r.b2c += toR(b.totalPaise); r.bookings += 1;
+    bySup.set(sid, r);
+  }
+  const items = [...bySup.values()].map((r) => ({
+    supplierId: r.supplierId,
+    b2b: Math.round(r.b2b),
+    b2c: Math.round(r.b2c),
+    difference: Math.round(r.b2c - r.b2b),
+    bookings: r.bookings,
+  }));
+  return ok(res, { items });
+});
+
+// GET /api/admin/b2b/supplier-revenue/:id — one supplier's paid bookings, each
+// valued at both B2B (base) and B2C (paid), for the side-by-side split view.
+const supplierRevenueDetail = asyncHandler(async (req, res) => {
+  const supplierId = Number(req.params.id);
+  const sup = await Supplier.findByPk(supplierId, { attributes: ['id', 'companyName', 'supplierName'] });
+  const exps = await Experience.findAll({ where: { supplierId }, attributes: ['id', 'name'] });
+  const expMap = new Map(exps.map((e) => [e.id, e.name]));
+  const ids = exps.map((e) => e.id);
+  const bookings = ids.length
+    ? await Booking.findAll({
+      where: { itemType: 'experience', itemId: { [Op.in]: ids } },
+      attributes: ['id', 'bookingCode', 'guestName', 'guestEmail', 'guestCount', 'subtotalPaise', 'totalPaise', 'status', 'paidAt', 'scheduledFor', 'createdAt', 'itemId'],
+      order: [['createdAt', 'DESC']],
+    })
+    : [];
+  const rows = bookings.filter(isPaid).map((b) => ({
+    code: b.bookingCode,
+    guest: b.guestName,
+    email: b.guestEmail,
+    guests: b.guestCount,
+    experience: expMap.get(b.itemId) || `#${b.itemId}`,
+    date: b.scheduledFor,
+    bookedAt: b.createdAt,
+    b2b: r0Money(b.subtotalPaise),
+    b2c: r0Money(b.totalPaise),
+    difference: r0Money(b.totalPaise) - r0Money(b.subtotalPaise),
+  }));
+  const b2b = Math.round(rows.reduce((s, r) => s + r.b2b, 0));
+  const b2c = Math.round(rows.reduce((s, r) => s + r.b2c, 0));
+  return ok(res, {
+    supplier: sup ? sup.toJSON() : { id: supplierId, companyName: `Supplier #${supplierId}` },
+    totals: { b2b, b2c, difference: b2c - b2b, bookings: rows.length },
+    rows,
+  });
+});
+const r0Money = (paise) => Math.round(toR(paise));
+
+module.exports = {
+  listLive, detail, tally, supplierRevenue, supplierRevenueDetail,
+};
