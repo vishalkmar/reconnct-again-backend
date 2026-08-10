@@ -192,6 +192,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migrateSupplierBankAndMarkup } = require('./scripts/migrateSupplierBankAndMarkup');
+    const result = await migrateSupplierBankAndMarkup();
+    if (result.changes?.length) {
+      console.log(`[DB] Supplier bank + markup schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Supplier bank/markup migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { migrate: migrateReviewQueueFields } = require('./scripts/migrateReviewQueueFields');
     const result = await migrateReviewQueueFields();
     if (result.changes?.length) {
