@@ -420,7 +420,7 @@ const voucherPdf = asyncHandler(async (req, res) => {
         const strip = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
         const incl = (Array.isArray(j.inclusions) ? j.inclusions : [])
           .map((x) => (typeof x === 'string' ? x : (x && (x.title || x.text)) || '')).map(strip).filter(Boolean).slice(0, 8);
-        extras = { image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || null, about: strip(j.about).slice(0, 700), inclusions: incl };
+        extras = { image: j.mainImage || (Array.isArray(j.gallery) && j.gallery[0]) || null, about: strip(j.about).slice(0, 700), inclusions: incl, gallery: (Array.isArray(j.gallery) ? j.gallery : []).slice(0, 4) };
       }
     } catch { /* extras are optional */ }
   }

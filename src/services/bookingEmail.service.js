@@ -235,7 +235,7 @@ const notifyHostOfBooking = async ({ booking }) => {
   const { Experience, User, Supplier } = require('../models');
   const exp = await Experience.findByPk(booking.itemId);
   if (!exp) return;
-  const hostExtras = { image: exp.mainImage, about: stripHtml(exp.about).slice(0, 700), inclusions: inclusionLines(exp.inclusions) };
+  const hostExtras = { image: exp.mainImage, about: stripHtml(exp.about).slice(0, 700), inclusions: inclusionLines(exp.inclusions), gallery: (Array.isArray(exp.gallery) ? exp.gallery : []).slice(0, 4) };
 
   // A listing is owned by EITHER a "Switch to Host" User (ownerUserId) OR a
   // Supplier (supplierId). Both should hear about a new booking — previously
