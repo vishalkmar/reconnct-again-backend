@@ -12,10 +12,15 @@ const login = asyncHandler(async (req, res) => {
   if (!email || !password) return fail(res, 'Email and password are required', 400);
 
   const supplier = await Supplier.findOne({ where: { email: String(email).toLowerCase().trim() } });
-  if (!supplier || !supplier.isActive) return fail(res, 'Invalid credentials', 401);
+  if (!supplier) return fail(res, 'Invalid credentials', 401);
 
   const matches = await supplier.comparePassword(password);
   if (!matches) return fail(res, 'Invalid credentials', 401);
+
+  // Correct credentials but the account is disabled — say so clearly instead of
+  // the misleading "Invalid credentials" (only after the password check, so a
+  // disabled account isn't revealed to someone who doesn't know the password).
+  if (!supplier.isActive) return fail(res, 'This supplier account is disabled. Please contact your account manager or admin to re-enable it.', 403);
 
   supplier.lastLoginAt = new Date();
   await supplier.save();

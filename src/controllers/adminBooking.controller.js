@@ -161,7 +161,28 @@ const getByCode = asyncHandler(async (req, res) => {
     include: [{ model: User, as: 'user' }],
   });
   if (!booking) return fail(res, 'Booking not found', 404);
-  return ok(res, { booking: adminBookingShape(booking) });
+  const shaped = adminBookingShape(booking);
+  // Rich experience details (about / inclusions / gallery) for the full-page
+  // voucher and the supplier split drawer.
+  if (booking.itemType === 'experience') {
+    try {
+      const exp = await Experience.findByPk(booking.itemId);
+      if (exp) {
+        const j = exp.toJSON();
+        const strip = (s) => String(s || '').replace(/<[^>]*>/g, ' ').replace(/&nbsp;/g, ' ').replace(/\s+/g, ' ').trim();
+        shaped.experience = {
+          id: j.id,
+          about: strip(j.about),
+          inclusions: (Array.isArray(j.inclusions) ? j.inclusions : [])
+            .map((x) => (typeof x === 'string' ? x : (x && (x.title || x.text)) || '')).map(strip).filter(Boolean),
+          gallery: (Array.isArray(j.gallery) ? j.gallery : []).slice(0, 6),
+          city: j.city || j.location || null,
+          durationLabel: (j.pricing && j.pricing.durationLabel) || (j.data && j.data.durationLabel) || null,
+        };
+      }
+    } catch { /* extras optional */ }
+  }
+  return ok(res, { booking: shaped });
 });
 
 // POST /api/admin/bookings/:code/mark-completed — for past-dated confirmed
