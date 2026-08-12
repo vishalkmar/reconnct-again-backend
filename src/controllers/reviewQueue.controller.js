@@ -343,28 +343,10 @@ const directList = asyncHandler(async (req, res) => {
     : 0;
   if (liveCount === 0) return fail(res, 'This supplier isn’t onboarded yet — send it to QCOPS instead', 400);
 
-  // COPS sets the final B2B price + GST / discount / convenience fee here.
-  applyGoLivePricing(item, req.body);
-
-  item.status = 'published';
-  item.isActive = true;
-  item.reviewStage = 'published';
-  item.reviewedByTeamMemberId = req.teamMember ? req.teamMember.id : null;
-  item.reviewedAt = new Date();
-  item.data = { ...(item.data || {}), hostStatus: 'approved', listedAt: item.data?.listedAt || new Date().toISOString() };
-  await item.save();
-  if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
-  // A host owns their listings directly — they get a KAM from the same pool
-  // the first time one of those listings goes live.
-  if (item.ownerUserId) ensureHostAccountManagerAssigned(item.ownerUserId).catch(() => {});
-
-  await reviewNotify.notifySubmitter(item, {
-    kind: 'approved',
-    title: `"${item.name}" is now live 🎉`,
-    message: 'Listed directly by Center Ops — it’s published on the website and app.',
-    meta: { experienceName: item.name },
-  }).catch(() => {});
-  reviewNotify.emitQueueChanged({ experienceId: item.id });
+  // COPS sets the final B2B price + GST / discount / convenience fee here, then
+  // the shared publisher fires the KAM assignment + live notifications.
+  const { publishLiveExperience } = require('../services/goLivePublish.service');
+  await publishLiveExperience(item, req.body, req.teamMember);
 
   const full = await Experience.findByPk(item.id, { include: INCLUDE });
   return ok(res, { item: (await withSource([full]))[0] }, 'Listed directly — now live');

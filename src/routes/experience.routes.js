@@ -8,6 +8,8 @@ router.get('/', authenticateStaff, c.list);
 router.put('/reorder', authenticate, c.reorder); // before /:id so it isn't swallowed
 router.get('/:id', authenticateStaff, c.getOne);
 router.post('/', authenticateStaff, requireStaffPermission('canAddExperience'), c.create);
+// BD "Direct listing" — publish straight to live (add-on; skips review).
+router.post('/:id/direct-live', authenticateStaff, requireStaffPermission('canAddExperience'), c.directLive);
 
 // Edit — admin, OR the team member who created it while it's still editable
 // (draft, e.g. after Center Ops requested changes — checked inside the

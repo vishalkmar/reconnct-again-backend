@@ -394,6 +394,19 @@ const delist = asyncHandler(async (req, res) => {
   return ok(res, { item: await withAudiences(full) }, 'Delisted from the platform');
 });
 
+// POST /api/experiences/:id/direct-live — the BD "Direct listing" add-on:
+// publish an experience the BD just created STRAIGHT to live (skipping the
+// Center Ops / QCOPS review), applying go-live pricing. Same downstream flow as
+// a COPS direct-list (KAM assignment + live notifications). Gated by
+// canAddExperience (BDs + admin) — suppliers/hosts can't reach staff routes.
+const directLive = asyncHandler(async (req, res) => {
+  const item = await Experience.findByPk(req.params.id);
+  if (!item) return fail(res, 'Experience not found', 404);
+  const { publishLiveExperience } = require('../services/goLivePublish.service');
+  await publishLiveExperience(item, req.body, req.teamMember);
+  return ok(res, { item: await Experience.findByPk(item.id) }, 'Listed directly — now live');
+});
+
 module.exports = {
-  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit, upRespond, delist,
+  list, getOne, create, update, duplicate, toggle, remove, reorder, resubmit, upRespond, delist, directLive,
 };
