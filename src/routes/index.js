@@ -83,6 +83,9 @@ router.use('/admin/analytics', require('./analytics.routes'));
 // B2B Management (admin) — per-live-experience command centre + payment tally.
 router.use('/admin/b2b', require('./b2bManagement.routes'));
 
+// Pricing Setup Management (admin) — global markup / discount / GST / convenience.
+router.use('/admin/pricing-setup', require('./pricingSetup.routes'));
+
 // PWA — mounted at /api/pwa/* so it stays visibly separate from the
 // website API. See backend/src/pwa/routes/index.js for sub-routes.
 router.use('/pwa', require('../pwa/routes'));

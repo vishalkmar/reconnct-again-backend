@@ -13,6 +13,7 @@ const {
 const reviewNotify = require('../services/reviewNotify.service');
 const reviewEmail = require('../services/reviewEmail.service');
 const { validateImagesForSubmit } = require('../utils/experienceValidation');
+const { applyRuleMarkup } = require('../services/markupRule.service');
 
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
@@ -168,6 +169,10 @@ const create = asyncHandler(async (req, res) => {
     data.status = 'pending_review';
   }
   const item = await Experience.create(data);
+  // Every new experience picks up the admin's global markup for its category /
+  // audience straight away, so it's already showing by the time it reaches the
+  // go-live screen. Never blocks the create if the rules can't be read.
+  await applyRuleMarkup(item).then(() => item.save()).catch(() => {});
   geocodeExperienceById(item.id, { force: true }).catch(() => {});
   if (item.supplierId) ensureAccountManagerAssigned(item.supplierId).catch(() => {});
   // A host owns their listings directly — they get a KAM from the same pool
@@ -206,6 +211,10 @@ const update = asyncHandler(async (req, res) => {
     data.slug = await uniqueSlug(req.body.slug, item.id);
   }
   await item.update(data);
+  // Changing the categories / audiences can change which markup rule wins.
+  if ('categoryIds' in data || 'audiences' in data) {
+    await applyRuleMarkup(item).then(() => item.save()).catch(() => {});
+  }
   if (data.location != null || data.city != null || data.pincode != null || data.nearbyLocation != null) {
     geocodeExperienceById(item.id, { force: true }).catch(() => {});
   }

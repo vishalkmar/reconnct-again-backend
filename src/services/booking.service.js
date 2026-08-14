@@ -14,7 +14,7 @@ const {
 } = require('../models');
 
 const { priceUnitLabel } = require('../config/priceType');
-const { withMarkup } = require('../utils/goLivePricing');
+const { withMarkup, markupAmount } = require('../utils/goLivePricing');
 
 const TAX_RATE = Number(process.env.BOOKING_TAX_RATE || 0.18); // 18% GST default
 const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'event_activity', 'experience'];
@@ -214,7 +214,8 @@ const fetchItem = async (type, id) => {
     const j = ex.toJSON();
     const pricing = j.pricing || {};
     // Markup is a real margin added on the B2B base, so the booking charges it.
-    const price = withMarkup(Number(pricing.adultPrice || pricing.fromPrice || 0), j.markup);
+    const rawBase = Number(pricing.adultPrice || pricing.fromPrice || 0);
+    const price = withMarkup(rawBase, j.markup);
     return {
       type: 'experience',
       id: j.id,
@@ -222,6 +223,12 @@ const fetchItem = async (type, id) => {
       slug: j.slug,
       image: j.mainImage,
       price,
+      // Snapshotted below so Markup Analytics can attribute earnings to the
+      // markup that was in force AT BOOKING TIME — a later rule change must
+      // never rewrite what past bookings earned.
+      basePrice: rawBase,
+      markup: j.markup || null,
+      markupPerUnit: markupAmount(rawBase, j.markup),
       currency: j.currency || 'INR',
       gstRate: Number(j.gstRate) || 0,
       priceType: 'per_person',
@@ -374,6 +381,11 @@ const buildItemSnapshot = (item) => ({
     tcsRate: item.tcsRate == null ? null : Number(item.tcsRate),
     priceType: item.priceType || null,
     priceLabel: item.priceLabel || null,
+    // Experiences only — the admin markup baked into `price`, frozen here so
+    // Markup Analytics can report what each booking actually earned.
+    ...(item.markupPerUnit != null
+      ? { basePrice: item.basePrice, markup: item.markup || null, markupPerUnit: item.markupPerUnit }
+      : {}),
   },
 });
 

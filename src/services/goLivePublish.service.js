@@ -1,4 +1,5 @@
 const { applyGoLivePricing } = require('../utils/goLivePricing');
+const { applyRuleMarkup } = require('./markupRule.service');
 const reviewNotify = require('./reviewNotify.service');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('./accountManager.service');
 
@@ -13,6 +14,9 @@ const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = requi
 */
 const publishLiveExperience = async (item, body = {}, teamMember = null) => {
   applyGoLivePricing(item, body);
+  // Markup is never taken from the form — it's whatever the admin's global
+  // Markup Management rules resolve to for this experience.
+  await applyRuleMarkup(item);
 
   item.status = 'published';
   item.isActive = true;

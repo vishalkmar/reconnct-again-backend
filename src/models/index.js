@@ -57,6 +57,7 @@ const Contract = require('./contract.model');
 const SupportConversation = require('./supportConversation.model');
 const SupportMessage = require('./supportMessage.model');
 const ReviewNotification = require('./reviewNotification.model');
+const MarkupRule = require('./markupRule.model');
 
 const db = {
   sequelize,
@@ -118,6 +119,7 @@ const db = {
   SupportConversation,
   SupportMessage,
   ReviewNotification,
+  MarkupRule,
 };
 
 // ─── Users: self-reference for referrals ──────────────────────────────────
