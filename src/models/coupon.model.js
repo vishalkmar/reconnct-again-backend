@@ -38,6 +38,32 @@ const Coupon = sequelize.define(
 
     description: { type: DataTypes.STRING(255), allowNull: true },
     isActive: { type: DataTypes.BOOLEAN, defaultValue: true },
+
+    /*
+      ── Discount Management (Pricing Setup) ───────────────────────────────
+      Which experiences this coupon may be redeemed against. Same four scopes
+      as Markup / GST / Convenience so the admin UI reads identically:
+
+        all        → anything bookable (referral + legacy coupons stay here)
+        category   → only experiences in these broad categories
+        audience   → only experiences carrying these "Who is this for" tags
+        experience → only these specific listings
+
+      Unlike the other three modules there is NO latest-wins here: coupons
+      don't compete, the customer types the one they hold. The discount comes
+      off the FINAL price — after markup, GST and the convenience fee.
+    */
+    scope: {
+      type: DataTypes.ENUM('all', 'category', 'audience', 'experience'),
+      allowNull: false,
+      defaultValue: 'all',
+    },
+    targetIds: { type: DataTypes.JSON, allowNull: false, defaultValue: [] },
+    // Marks the coupons created from admin → Discount Management, so the
+    // module lists its own coupons and not every referral code ever issued.
+    isDiscountRule: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    createdByAdminId: { type: DataTypes.INTEGER, allowNull: true },
+    createdByName: { type: DataTypes.STRING(160), allowNull: true },
   },
   {
     tableName: 'coupons',
@@ -46,6 +72,8 @@ const Coupon = sequelize.define(
       { fields: ['userId'] },
       { fields: ['isActive'] },
       { fields: ['reason'] },
+      { fields: ['scope'] },
+      { fields: ['isDiscountRule'] },
     ],
   }
 );

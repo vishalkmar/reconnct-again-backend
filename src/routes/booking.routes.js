@@ -8,6 +8,9 @@ const { authenticateUser } = require('../middlewares/userAuth.middleware');
 router.use(authenticateUser);
 
 router.post('/preview', ctrl.preview);
+// "Apply coupon" on the app's booking screen — validates the code against this
+// specific experience and returns what it takes off.
+router.post('/coupon-check', ctrl.couponCheck);
 router.post('/', ctrl.create);
 router.get('/me', ctrl.listMine);
 // Ahead of /me/:code so "pending-review" isn't swallowed as a booking code.

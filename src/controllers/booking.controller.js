@@ -106,6 +106,62 @@ const publicBooking = (booking) => {
   };
 };
 
+/*
+  POST /api/bookings/coupon-check { itemType, itemId, guestCount?, couponCode }
+
+  A slim "does this code work here, and what does it take off?" for the app's
+  Apply-coupon box. Same validation the real booking runs — including the
+  coupon's scope (all / category / audience / experience) and the discount
+  coming off the FINAL amount — so what the app shows is what gets charged.
+  Pure read, no DB write.
+*/
+const couponCheck = asyncHandler(async (req, res) => {
+  const itemType = normalizeType(req.body.itemType);
+  const itemId = parseInt(req.body.itemId, 10);
+  if (!ALLOWED_TYPES.includes(itemType)) return fail(res, 'Invalid item type', 400);
+  if (!Number.isInteger(itemId) || itemId <= 0) return fail(res, 'Invalid item id', 400);
+
+  const code = req.body.couponCode ? String(req.body.couponCode).trim().toUpperCase() : '';
+  if (!code) return fail(res, 'Please enter a coupon code', 400);
+
+  const item = await fetchItem(itemType, itemId);
+  if (!item) return fail(res, 'Item not found or no longer available', 404);
+
+  const schedule = resolveSchedule({ item, scheduledFor: req.body.scheduledFor });
+  const guestCount = Math.max(1, parseInt(req.body.guestCount, 10) || 1);
+  const base = computePricing({
+    item,
+    guestCount,
+    units: schedule.units,
+    roomCount: 1,
+    extraPersons: parseExtraPersons(req.body.extraPersons),
+    walletPaise: 0,
+    couponDiscountPaise: 0,
+  });
+
+  const result = await validateCouponFor({
+    code,
+    user: req.user,
+    subtotalPaise: base.subtotalPaise,
+    taxPaise: base.taxPaise,
+    conveniencePaise: base.conveniencePaise,
+    item,
+  });
+
+  if (!result.ok) return ok(res, { ok: false, code, reason: result.reason, discount: 0 });
+
+  const payableBefore = base.subtotalPaise + base.taxPaise + base.conveniencePaise;
+  return ok(res, {
+    ok: true,
+    code,
+    discountPaise: result.discountPaise,
+    discount: result.discountPaise / 100,
+    description: result.description || null,
+    payableBefore: payableBefore / 100,
+    payableAfter: Math.max(0, payableBefore - result.discountPaise) / 100,
+  }, 'Coupon applied');
+});
+
 // POST /api/bookings/preview { itemType, itemId, scheduledFor?, scheduledEndAt?, guestCount?, walletPaise?, couponCode? }
 // Pure read — no DB write. Returns the full pricing breakdown + item snapshot
 // the frontend renders BEFORE the user commits to creating a booking.
@@ -143,6 +199,8 @@ const preview = asyncHandler(async (req, res) => {
       user: req.user,
       subtotalPaise: base.subtotalPaise,
       taxPaise: base.taxPaise,
+      conveniencePaise: base.conveniencePaise,
+      item,
     });
     if (couponResult.ok) couponDiscountPaise = couponResult.discountPaise;
   }
@@ -151,7 +209,7 @@ const preview = asyncHandler(async (req, res) => {
   // AND the admin's anti-abuse cap (max per booking). The frontend can pass
   // useWallet=true ("use as much as the cap allows") or an explicit
   // useWalletPaise number ("up to N paise, still capped").
-  const grossPaise = base.subtotalPaise + base.taxPaise;
+  const grossPaise = base.subtotalPaise + base.taxPaise + base.conveniencePaise;
   const userBalance = req.user.walletBalancePaise || 0;
   const refConfig = await loadReferralConfig();
   let walletPaise = 0;
@@ -278,6 +336,8 @@ const create = asyncHandler(async (req, res) => {
       user: req.user,
       subtotalPaise: base.subtotalPaise,
       taxPaise: base.taxPaise,
+      conveniencePaise: base.conveniencePaise,
+      item,
     });
     if (!result.ok) return fail(res, result.reason, 400);
     couponObj = result.coupon;
@@ -286,7 +346,7 @@ const create = asyncHandler(async (req, res) => {
   }
 
   // ── Resolve wallet draw (if any) — same admin cap as the preview path.
-  const gross = base.subtotalPaise + base.taxPaise;
+  const gross = base.subtotalPaise + base.taxPaise + base.conveniencePaise;
   const userBalance = req.user.walletBalancePaise || 0;
   let walletPaise = 0;
   if (req.body.useWallet === true || req.body.useWalletPaise) {
@@ -557,6 +617,7 @@ const cancelMine = asyncHandler(async (req, res) => {
 
 module.exports = {
   preview,
+  couponCheck,
   create,
   listMine,
   getMineByCode,

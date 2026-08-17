@@ -6,6 +6,7 @@ const {
 const { ok, fail } = require('../utils/response');
 const { coordsForCity, haversineKm } = require('./geo.controller');
 const cashfree = require('../services/cashfree.service');
+const { withMarkup, taxableBase } = require('../utils/goLivePricing');
 
 /*
   PUBLIC (no-auth) surface for the mobile app (reconnct).
@@ -23,15 +24,25 @@ const INCLUDE = [
 // pricing.adultPrice is the headline "from" price; the unit comes from priceMethod.
 const UNIT = { per_person: 'person', per_day: 'day', days: 'day', per_hours: 'session' };
 
+/*
+  The headline "from ₹X" on every card and detail header.
+
+  It is the adult price WITH THE ADMIN MARKUP ALREADY IN IT, because markup is
+  a real margin the booking charges (services/booking.service resolveItem does
+  exactly the same `withMarkup`). Showing the bare B2B base here would quote the
+  customer a price we never actually charge.
+
+  GST / convenience are NOT folded in — those are shown as their own lines in
+  the booking breakdown, the same way every travel app does it.
+*/
 const fromPrice = (exp) => {
   const p = exp.pricing || {};
-  // Headline price is the adult price (matches the card/detail design). Only
-  // fall back to the cheapest charged child band if there's no adult price.
-  const adult = Number(p.adultPrice);
-  if (Number.isFinite(adult) && adult > 0) return adult;
+  // In 'pure' GST mode the supplier's own tax comes out of the base first.
+  const net = taxableBase(Number(p.adultPrice), exp);
+  if (Number.isFinite(net) && net > 0) return Math.round(withMarkup(net, exp.markup));
   const bands = (Array.isArray(p.childBands) ? p.childBands : [])
     .map((b) => Number(b && b.price)).filter((n) => Number.isFinite(n) && n > 0);
-  return bands.length ? Math.min(...bands) : 0;
+  return bands.length ? Math.round(withMarkup(Math.min(...bands), exp.markup)) : 0;
 };
 
 // Normalised child bands for the detail page's pricing block. Bands are keyed
@@ -48,7 +59,9 @@ const childBands = (exp) => {
     endHeight: Number(b.endHeight) || 0,
     unit: height ? 'cm' : 'yr',
     charge: b.charge !== false && Number(b.price) > 0,
-    price: Number(b.price) || 0,
+    // Markup applies per person, children included — so a child seat quotes the
+    // same way the booking charges it.
+    price: Number(b.price) > 0 ? Math.round(withMarkup(taxableBase(Number(b.price), exp), exp.markup)) : 0,
   }));
 };
 

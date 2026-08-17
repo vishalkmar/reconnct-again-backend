@@ -233,6 +233,13 @@ const fetchItem = async (type, id) => {
       markupPerUnit: markupAmount(rawBase, j.markup),
       // Charged on the post-GST amount at the end of computePricing.
       convenienceFee: j.convenienceFee || null,
+      // Lets a scoped discount coupon decide whether it covers this listing
+      // (services/referEarn.couponCoversItem) without a second DB read.
+      taxonomy: {
+        categoryId: j.categoryId,
+        categoryIds: j.categoryIds || [],
+        audiences: j.audiences || [],
+      },
       currency: j.currency || 'INR',
       gstRate: Number(j.gstRate) || 0,
       priceType: 'per_person',

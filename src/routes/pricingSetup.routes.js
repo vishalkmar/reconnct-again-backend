@@ -7,6 +7,7 @@ const g = require('../controllers/gstRule.controller');
 const { gstAnalytics } = require('../controllers/gstAnalytics.controller');
 const c = require('../controllers/convenienceRule.controller');
 const { convenienceAnalytics } = require('../controllers/convenienceAnalytics.controller');
+const d = require('../controllers/discountCoupon.controller');
 
 /*
   Admin "Pricing Setup Management". Markup Management is the first module;
@@ -72,5 +73,18 @@ router.get('/convenience/analytics', authenticate, convenienceAnalytics);
 router.get('/convenience/experience/:experienceId', authenticateStaff, c.effectiveForExperience);
 router.put('/convenience/experience/:experienceId', authenticateStaff, c.setExperienceOverride);
 router.delete('/convenience/experience/:experienceId', authenticateStaff, c.clearExperienceOverride);
+
+// ── Discount Management (coupon-based) ─────────────────────────────────────
+// A discount is only real once it has a code a customer can type, so the code
+// is generated first and the coupon is created with it in one go.
+router.get('/discount/coupons', authenticate, d.listCoupons);
+router.post('/discount/generate-code', authenticate, d.generateCode);
+router.post('/discount/coupons', authenticate, d.createCoupon);
+router.put('/discount/coupons/:id', authenticate, d.updateCoupon);
+router.patch('/discount/coupons/:id/toggle', authenticate, d.toggleCoupon);
+router.delete('/discount/coupons/:id', authenticate, d.removeCoupon);
+
+router.get('/discount/targets', authenticate, d.targets);
+router.get('/discount/analytics', authenticate, d.discountAnalytics);
 
 module.exports = router;

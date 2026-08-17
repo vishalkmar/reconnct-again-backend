@@ -397,9 +397,54 @@ const creditReferrerForFirstPaid = async ({ booking }) => {
   return credit ? [credit] : null;
 };
 
-// ─── Coupon validation / lifecycle (unchanged from v1) ────────────────────
+// ─── Coupon validation / lifecycle ───────────────────────────────────────
 
-const validateCouponFor = async ({ code, user, subtotalPaise, taxPaise }) => {
+/*
+  Does a scoped coupon (admin → Discount Management) cover the item being
+  booked? Scope 'all' covers everything — that's every referral and legacy
+  coupon, so their behaviour is unchanged. The narrower scopes only ever match
+  an EXPERIENCE, because that's the only thing the taxonomy describes.
+
+  `item` is the resolved booking item (services/booking.service.fetchItem); it
+  carries the taxonomy on `item.taxonomy`.
+*/
+const couponCoversItem = (coupon, item) => {
+  const scope = coupon.scope || 'all';
+  if (scope === 'all') return { ok: true };
+  if (!item || item.type !== 'experience') {
+    return { ok: false, reason: 'This coupon only works on experiences' };
+  }
+  const targets = (Array.isArray(coupon.targetIds) ? coupon.targetIds : []).map(Number);
+  const tax = item.taxonomy || {};
+  const nums = (v) => (Array.isArray(v) ? v.map(Number) : []);
+
+  if (scope === 'experience') {
+    if (targets.includes(Number(item.id))) return { ok: true };
+    return { ok: false, reason: 'This coupon is not valid for this experience' };
+  }
+  if (scope === 'category') {
+    const own = new Set(nums(tax.categoryIds));
+    if (tax.categoryId != null) own.add(Number(tax.categoryId));
+    if (targets.some((t) => own.has(t))) return { ok: true };
+    return { ok: false, reason: 'This coupon is not valid for this category' };
+  }
+  if (scope === 'audience') {
+    const own = new Set(nums(tax.audiences));
+    if (targets.some((t) => own.has(t))) return { ok: true };
+    return { ok: false, reason: 'This coupon is not valid for this experience' };
+  }
+  return { ok: false, reason: 'This coupon is not valid here' };
+};
+
+/*
+  `conveniencePaise` is included in the amount the discount comes off, so a
+  coupon reduces the FINAL price the customer is about to pay — base + markup,
+  less nothing, plus GST, plus the convenience fee. `item` enables the scope
+  check above; both are optional so older callers keep working.
+*/
+const validateCouponFor = async ({
+  code, user, subtotalPaise, taxPaise, conveniencePaise = 0, item = null,
+}) => {
   const clean = String(code || '').trim().toUpperCase();
   if (!clean) return { ok: false, reason: 'Please enter a coupon code' };
 
@@ -434,7 +479,13 @@ const validateCouponFor = async ({ code, user, subtotalPaise, taxPaise }) => {
   if (coupon.expiresAt && new Date(coupon.expiresAt) < new Date()) return { ok: false, reason: 'This coupon has expired' };
   if (coupon.usageLimit && coupon.timesUsed >= coupon.usageLimit) return { ok: false, reason: 'This coupon has already been used' };
 
-  const grossPaise = (subtotalPaise || 0) + (taxPaise || 0);
+  // Scope gate — an admin discount coupon may be limited to certain
+  // categories / audiences / listings.
+  const covers = couponCoversItem(coupon, item);
+  if (!covers.ok) return { ok: false, reason: covers.reason };
+
+  // The discount comes off the FINAL amount, convenience fee included.
+  const grossPaise = (subtotalPaise || 0) + (taxPaise || 0) + (conveniencePaise || 0);
   if (coupon.minOrderPaise && grossPaise < coupon.minOrderPaise) {
     return {
       ok: false,
@@ -532,6 +583,7 @@ module.exports = {
   creditReferrerForFirstLogin,
   creditReferrerForFirstPaid,
   validateCouponFor,
+  couponCoversItem,
   consumeCoupon,
   restoreCoupon,
   debitWalletForBooking,
