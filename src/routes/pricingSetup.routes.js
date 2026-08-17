@@ -5,6 +5,8 @@ const m = require('../controllers/markupRule.controller');
 const { markupAnalytics } = require('../controllers/markupAnalytics.controller');
 const g = require('../controllers/gstRule.controller');
 const { gstAnalytics } = require('../controllers/gstAnalytics.controller');
+const c = require('../controllers/convenienceRule.controller');
+const { convenienceAnalytics } = require('../controllers/convenienceAnalytics.controller');
 
 /*
   Admin "Pricing Setup Management". Markup Management is the first module;
@@ -52,5 +54,23 @@ router.get('/gst/analytics', authenticate, gstAnalytics);
 router.get('/gst/experience/:experienceId', authenticateStaff, g.effectiveForExperience);
 router.put('/gst/experience/:experienceId', authenticateStaff, g.setExperienceDecision);
 router.delete('/gst/experience/:experienceId', authenticateStaff, g.clearExperienceDecision);
+
+// ── Convenience Management ─────────────────────────────────────────────────
+router.get('/convenience/rules', authenticate, c.listRules);
+router.post('/convenience/rules', authenticate, c.createRule);
+router.put('/convenience/rules/:id', authenticate, c.updateRule);
+router.patch('/convenience/rules/:id/toggle', authenticate, c.toggleRule);
+router.delete('/convenience/rules/:id', authenticate, c.removeRule);
+
+router.get('/convenience/targets', authenticate, c.targets);
+router.get('/convenience/effective', authenticate, c.effectiveList);
+router.post('/convenience/resync', authenticate, c.resync);
+
+router.get('/convenience/analytics', authenticate, convenienceAnalytics);
+
+// Shared with the Team Portal's go-live pricing modal.
+router.get('/convenience/experience/:experienceId', authenticateStaff, c.effectiveForExperience);
+router.put('/convenience/experience/:experienceId', authenticateStaff, c.setExperienceOverride);
+router.delete('/convenience/experience/:experienceId', authenticateStaff, c.clearExperienceOverride);
 
 module.exports = router;

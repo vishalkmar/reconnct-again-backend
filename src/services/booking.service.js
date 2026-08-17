@@ -14,7 +14,7 @@ const {
 } = require('../models');
 
 const { priceUnitLabel } = require('../config/priceType');
-const { withMarkup, markupAmount, taxableBase } = require('../utils/goLivePricing');
+const { withMarkup, markupAmount, taxableBase, convenienceAmount } = require('../utils/goLivePricing');
 
 const TAX_RATE = Number(process.env.BOOKING_TAX_RATE || 0.18); // 18% GST default
 const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'event_activity', 'experience'];
@@ -231,6 +231,8 @@ const fetchItem = async (type, id) => {
       basePrice: rawBase,
       markup: j.markup || null,
       markupPerUnit: markupAmount(rawBase, j.markup),
+      // Charged on the post-GST amount at the end of computePricing.
+      convenienceFee: j.convenienceFee || null,
       currency: j.currency || 'INR',
       gstRate: Number(j.gstRate) || 0,
       priceType: 'per_person',
@@ -319,9 +321,17 @@ const computePricing = ({
   const tcsPaise = Math.round((subtotalPaise + gstPaise) * tcsRate);
   const taxPaise = gstPaise + tcsPaise;
 
+  // Convenience fee — the LAST thing added, on the amount that already carries
+  // GST, exactly as the go-live preview and the app's breakdown show it. It's a
+  // platform charge on the BOOKING (not per guest), so it lands once, before
+  // wallet/coupon come off.
+  // convenienceAmount() works in RUPEES — a 'fixed' fee is a rupee figure, so
+  // the conversion has to happen on both sides, not just the result.
+  const conveniencePaise = toPaise(convenienceAmount(fromPaise(subtotalPaise + taxPaise), item.convenienceFee));
+
   // Discounts are applied after tax (matches MMT's display). Clamp so we
   // never go below zero — defensive in case a coupon overshoots.
-  const grossPaise = subtotalPaise + taxPaise;
+  const grossPaise = subtotalPaise + taxPaise + conveniencePaise;
   const walletDiscountPaise = Math.min(Math.max(0, Number(walletPaise || 0)), grossPaise);
   const remaining = grossPaise - walletDiscountPaise;
   const safeCoupon = Math.min(Math.max(0, Number(couponDiscountPaise || 0)), remaining);
@@ -338,6 +348,7 @@ const computePricing = ({
     gstPaise,
     tcsPaise,
     taxPaise,
+    conveniencePaise,
     taxRate: itemRate,
     gstRate: item.gstRate == null ? null : Number(item.gstRate),
     tcsRate: item.tcsRate == null ? null : Number(item.tcsRate),
@@ -352,6 +363,7 @@ const computePricing = ({
       gst: fromPaise(gstPaise),
       tcs: fromPaise(tcsPaise),
       tax: fromPaise(taxPaise),
+      convenience: fromPaise(conveniencePaise),
       extraPersons: fromPaise(extraPersonsPaise),
       walletDiscount: fromPaise(walletDiscountPaise),
       couponDiscount: fromPaise(safeCoupon),
@@ -388,6 +400,9 @@ const buildItemSnapshot = (item) => ({
     ...(item.markupPerUnit != null
       ? { basePrice: item.basePrice, markup: item.markup || null, markupPerUnit: item.markupPerUnit }
       : {}),
+    // The convenience-fee config in force at booking time, so a later rule
+    // change never rewrites what a past booking was charged.
+    ...(item.convenienceFee ? { convenienceFee: item.convenienceFee } : {}),
   },
 });
 

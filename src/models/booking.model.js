@@ -75,6 +75,11 @@ const Booking = sequelize.define(
     gstPaise: { type: DataTypes.INTEGER, defaultValue: 0 },
     tcsPaise: { type: DataTypes.INTEGER, defaultValue: 0 },
     taxPaise: { type: DataTypes.INTEGER, defaultValue: 0 },
+    // Convenience fee — charged LAST, on the amount that already includes GST
+    // (see utils/goLivePricing.convenienceAmount). Stored separately from the
+    // total so Convenience Analytics reports the real collected figure rather
+    // than re-deriving it from a rule that may have changed since.
+    conveniencePaise: { type: DataTypes.INTEGER, defaultValue: 0 },
     walletDiscountPaise: { type: DataTypes.INTEGER, defaultValue: 0 },
     couponDiscountPaise: { type: DataTypes.INTEGER, defaultValue: 0 },
     couponCode: { type: DataTypes.STRING(40), allowNull: true },

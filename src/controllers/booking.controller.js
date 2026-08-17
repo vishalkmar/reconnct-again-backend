@@ -337,6 +337,7 @@ const create = asyncHandler(async (req, res) => {
     gstPaise: pricing.gstPaise,
     tcsPaise: pricing.tcsPaise,
     taxPaise: pricing.taxPaise,
+    conveniencePaise: pricing.conveniencePaise,
     walletDiscountPaise: pricing.walletDiscountPaise,
     couponDiscountPaise: pricing.couponDiscountPaise,
     couponCode: couponCodeApplied,

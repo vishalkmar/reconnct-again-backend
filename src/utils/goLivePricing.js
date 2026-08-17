@@ -17,7 +17,20 @@ const applyGoLivePricing = (item, body = {}) => {
   if (body.priceMethod !== undefined && body.priceMethod) item.priceMethod = body.priceMethod;
   if (body.pricing !== undefined && body.pricing && typeof body.pricing === 'object') item.pricing = body.pricing;
   if (body.discount !== undefined) item.discount = body.discount || null;
-  if (body.convenienceFee !== undefined) item.convenienceFee = body.convenienceFee || null;
+};
+
+/*
+  The convenience fee, charged LAST — on the amount that already includes GST.
+    free       → nothing (the months / cut-through are display-only)
+    fixed      → a flat ₹ amount
+    percentage → a % of that post-GST amount
+*/
+const convenienceAmount = (afterGst, fee) => {
+  const a = Number(afterGst) || 0;
+  if (!fee || !fee.type || fee.type === 'free') return 0;
+  const v = Number(fee.value) || 0;
+  if (v <= 0) return 0;
+  return fee.type === 'percentage' ? (a * v) / 100 : v;
 };
 
 /*
@@ -51,4 +64,4 @@ const markupAmount = (base, markup) => {
 // charges (GST etc. then apply on top), so markup is real revenue, not display.
 const withMarkup = (base, markup) => (Number(base) || 0) + markupAmount(base, markup);
 
-module.exports = { applyGoLivePricing, markupAmount, withMarkup, taxableBase };
+module.exports = { applyGoLivePricing, markupAmount, withMarkup, taxableBase, convenienceAmount };

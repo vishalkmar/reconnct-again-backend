@@ -1,6 +1,7 @@
 const { applyGoLivePricing } = require('../utils/goLivePricing');
 const { applyRuleMarkup } = require('./markupRule.service');
 const { applyRuleGst } = require('./gstRule.service');
+const { applyRuleConvenience } = require('./convenienceRule.service');
 const reviewNotify = require('./reviewNotify.service');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('./accountManager.service');
 
@@ -20,6 +21,7 @@ const publishLiveExperience = async (item, body = {}, teamMember = null) => {
   // Center Ops's included/double/pure decision for this listing.
   await applyRuleMarkup(item);
   await applyRuleGst(item, body);
+  await applyRuleConvenience(item);
 
   item.status = 'published';
   item.isActive = true;

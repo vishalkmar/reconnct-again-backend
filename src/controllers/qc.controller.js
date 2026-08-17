@@ -275,6 +275,7 @@ const goLive = asyncHandler(async (req, res) => {
   applyGoLivePricing(item, req.body);
   await require('../services/markupRule.service').applyRuleMarkup(item);
   await require('../services/gstRule.service').applyRuleGst(item, req.body);
+  await require('../services/convenienceRule.service').applyRuleConvenience(item);
   await publishLive(item, req.teamMember ? req.teamMember.id : null);
   return ok(res, { item: item.toJSON() }, 'Published — now live on web & app');
 });
