@@ -7,6 +7,7 @@ const { ok, created, fail } = require('../utils/response');
 const {
   loadRules, pickRule, markupOf, matches, matchingRules, syncExperienceMarkups,
 } = require('../services/markupRule.service');
+const { findGlobalRules, collapseGlobalRules } = require('../utils/singleGlobalRule');
 
 /*
   Admin "Pricing Setup Management → Markup Management".
@@ -184,12 +185,27 @@ const validateRule = (body) => {
 const createRule = asyncHandler(async (req, res) => {
   const { error, data } = validateRule(req.body);
   if (error) return fail(res, error, 400);
-  const rule = await MarkupRule.create({
-    ...data,
+  const stamp = {
     appliedAt: new Date(),
     createdByAdminId: req.admin ? req.admin.id : null,
     createdByName: req.admin ? (req.admin.name || req.admin.email) : (req.teamMember ? req.teamMember.name : null),
-  });
+  };
+
+  // "To All" is the single platform-wide default — a new one replaces the old
+  // one rather than stacking a rule that would govern nothing.
+  if (data.scope === 'all') {
+    const existing = await findGlobalRules(MarkupRule);
+    if (existing.length) {
+      const keep = existing[0];
+      await keep.update({ ...data, isActive: true, ...stamp });
+      await collapseGlobalRules(MarkupRule, keep.id);
+      const s = await syncExperienceMarkups();
+      return ok(res, { item: keep.toJSON(), sync: s, replaced: true },
+        `Platform-wide markup updated — applied to ${s.updated} experience(s)`);
+    }
+  }
+
+  const rule = await MarkupRule.create({ ...data, ...stamp });
   const sync = await syncExperienceMarkups();
   return created(res, { item: rule.toJSON(), sync }, `Markup applied to ${sync.updated} experience(s)`);
 });
@@ -202,6 +218,8 @@ const updateRule = asyncHandler(async (req, res) => {
   const { error, data } = validateRule({ ...rule.toJSON(), ...req.body });
   if (error) return fail(res, error, 400);
   await rule.update({ ...data, appliedAt: new Date() });
+  // Editing a rule INTO the 'all' scope must not create a second global default.
+  if (data.scope === 'all') await collapseGlobalRules(MarkupRule, rule.id);
   const sync = await syncExperienceMarkups();
   return ok(res, { item: rule.toJSON(), sync }, 'Markup updated');
 });

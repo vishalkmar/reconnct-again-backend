@@ -8,6 +8,7 @@ const {
   MODES, loadRules, pickRule, matches, matchingRules, resolveGst, syncExperienceGst,
 } = require('../services/gstRule.service');
 const { taxableBase, withMarkup } = require('../utils/goLivePricing');
+const { findGlobalRules, collapseGlobalRules } = require('../utils/singleGlobalRule');
 
 /*
   Admin "Pricing Setup Management → GST & Taxes Management".
@@ -198,12 +199,27 @@ const who = (req) => (req.admin ? (req.admin.name || req.admin.email) : (req.tea
 const createRule = asyncHandler(async (req, res) => {
   const { error, data } = validateRule(req.body);
   if (error) return fail(res, error, 400);
-  const rule = await GstRule.create({
-    ...data,
+  const stamp = {
     appliedAt: new Date(),
     createdByAdminId: req.admin ? req.admin.id : null,
     createdByName: who(req),
-  });
+  };
+
+  // "To All" is the single platform-wide default — a new one replaces the old
+  // one rather than stacking a rule that would govern nothing.
+  if (data.scope === 'all') {
+    const existing = await findGlobalRules(GstRule);
+    if (existing.length) {
+      const keep = existing[0];
+      await keep.update({ ...data, isActive: true, ...stamp });
+      await collapseGlobalRules(GstRule, keep.id);
+      const s = await syncExperienceGst();
+      return ok(res, { item: keep.toJSON(), sync: s, replaced: true },
+        `Platform-wide GST updated — applied to ${s.updated} experience(s)`);
+    }
+  }
+
+  const rule = await GstRule.create({ ...data, ...stamp });
   const sync = await syncExperienceGst();
   return created(res, { item: rule.toJSON(), sync }, `GST applied to ${sync.updated} experience(s)`);
 });
@@ -215,6 +231,8 @@ const updateRule = asyncHandler(async (req, res) => {
   const { error, data } = validateRule({ ...rule.toJSON(), ...req.body });
   if (error) return fail(res, error, 400);
   await rule.update({ ...data, appliedAt: new Date() });
+  // Editing a rule INTO the 'all' scope must not create a second global default.
+  if (data.scope === 'all') await collapseGlobalRules(GstRule, rule.id);
   const sync = await syncExperienceGst();
   return ok(res, { item: rule.toJSON(), sync }, 'GST updated');
 });
