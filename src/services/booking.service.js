@@ -14,7 +14,7 @@ const {
 } = require('../models');
 
 const { priceUnitLabel } = require('../config/priceType');
-const { withMarkup, markupAmount } = require('../utils/goLivePricing');
+const { withMarkup, markupAmount, taxableBase } = require('../utils/goLivePricing');
 
 const TAX_RATE = Number(process.env.BOOKING_TAX_RATE || 0.18); // 18% GST default
 const ALLOWED_TYPES = ['package', 'room', 'event', 'addon', 'event_activity', 'experience'];
@@ -213,8 +213,10 @@ const fetchItem = async (type, id) => {
     if (!ex || ex.isActive === false || ex.status === 'archived') return null;
     const j = ex.toJSON();
     const pricing = j.pricing || {};
+    // In 'pure' GST mode the adder's own GST is stripped out of the quoted base
+    // before anything else, so the customer is taxed once, not twice.
+    const rawBase = taxableBase(Number(pricing.adultPrice || pricing.fromPrice || 0), j);
     // Markup is a real margin added on the B2B base, so the booking charges it.
-    const rawBase = Number(pricing.adultPrice || pricing.fromPrice || 0);
     const price = withMarkup(rawBase, j.markup);
     return {
       type: 'experience',

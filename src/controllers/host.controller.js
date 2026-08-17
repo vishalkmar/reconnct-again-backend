@@ -238,6 +238,11 @@ const mapFormToExperience = (form = {}) => {
     priceMethod: form.priceMethod || 'per_person',
     pricing: {
       adultPrice: Number(form.adultPrice) || 0, // B2B — the working price
+      // "Included GST" — the adder says this quoted price ALREADY carries GST
+      // at the chosen rate. Center Ops sees it at go-live and decides whether
+      // ours applies on top (see services/gstRule.service.js).
+      gstIncluded: !!form.gstIncluded,
+      gstIncludedRate: form.gstIncluded ? (Number(form.gstIncludedRate) || 18) : 0,
       childrenEnabled: !!form.childrenEnabled,
       childMode: form.childMode === 'height' ? 'height' : 'age',
       childBands: Array.isArray(form.childBands) ? form.childBands : [],
@@ -369,6 +374,8 @@ const toHostForm = (exp) => {
     // B2B working price (drives booking, COPS adds GST/discount/convenience).
     priceMethod: j.priceMethod || 'per_person',
     adultPrice: p.adultPrice ? String(p.adultPrice) : '',
+    gstIncluded: !!p.gstIncluded,
+    gstIncludedRate: Number(p.gstIncludedRate) || 18,
     childrenEnabled: !!p.childrenEnabled,
     childMode: p.childMode === 'height' ? 'height' : 'age',
     childBands: p.childBands || [],

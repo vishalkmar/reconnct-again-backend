@@ -274,6 +274,7 @@ const goLive = asyncHandler(async (req, res) => {
   // Markup is not theirs to type — it resolves from Markup Management.
   applyGoLivePricing(item, req.body);
   await require('../services/markupRule.service').applyRuleMarkup(item);
+  await require('../services/gstRule.service').applyRuleGst(item, req.body);
   await publishLive(item, req.teamMember ? req.teamMember.id : null);
   return ok(res, { item: item.toJSON() }, 'Published — now live on web & app');
 });

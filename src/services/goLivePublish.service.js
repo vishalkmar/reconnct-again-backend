@@ -1,5 +1,6 @@
 const { applyGoLivePricing } = require('../utils/goLivePricing');
 const { applyRuleMarkup } = require('./markupRule.service');
+const { applyRuleGst } = require('./gstRule.service');
 const reviewNotify = require('./reviewNotify.service');
 const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = require('./accountManager.service');
 
@@ -14,9 +15,11 @@ const { ensureAccountManagerAssigned, ensureHostAccountManagerAssigned } = requi
 */
 const publishLiveExperience = async (item, body = {}, teamMember = null) => {
   applyGoLivePricing(item, body);
-  // Markup is never taken from the form — it's whatever the admin's global
-  // Markup Management rules resolve to for this experience.
+  // Markup + GST are never taken from the form as loose numbers — they resolve
+  // from the admin's global Pricing Setup rules. `body.gstMode` only records
+  // Center Ops's included/double/pure decision for this listing.
   await applyRuleMarkup(item);
+  await applyRuleGst(item, body);
 
   item.status = 'published';
   item.isActive = true;

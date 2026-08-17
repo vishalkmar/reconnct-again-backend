@@ -58,6 +58,7 @@ const SupportConversation = require('./supportConversation.model');
 const SupportMessage = require('./supportMessage.model');
 const ReviewNotification = require('./reviewNotification.model');
 const MarkupRule = require('./markupRule.model');
+const GstRule = require('./gstRule.model');
 
 const db = {
   sequelize,
@@ -120,6 +121,7 @@ const db = {
   SupportMessage,
   ReviewNotification,
   MarkupRule,
+  GstRule,
 };
 
 // ─── Users: self-reference for referrals ──────────────────────────────────

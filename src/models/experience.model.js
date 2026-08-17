@@ -122,6 +122,20 @@ const Experience = sequelize.define(
     // Markup — a margin COPS adds ON the B2B base at go-live, applied BEFORE
     // discount. { type:'percentage'|'fixed', value }
     markup: { type: DataTypes.JSON, allowNull: true },
+    /*
+      How GST was decided for THIS experience at go-live. `gstRate` above stays
+      the single number the booking charges; this records why it is that number:
+        { submittedIncluded, submittedRate,   // what the adder quoted
+          mode: 'global'    → adder quoted GST-exclusive, our rate applies
+                'included'  → adder's price already has GST, we add nothing
+                'double'    → adder's price has GST AND we add ours on top
+                'pure'      → adder's GST is stripped out, only ours applies
+          rate, source:'rule'|'manual', ruleId, ruleScope, decidedAt }
+      The adder's own toggle lives in `pricing.gstIncluded` / `pricing.gstIncludedRate`
+      so every upload surface (admin/BD/host/supplier, web + app) carries it for
+      free with the pricing block it already sends.
+    */
+    gstConfig: { type: DataTypes.JSON, allowNull: true },
     discount: { type: DataTypes.JSON, allowNull: true }, // { type:'percentage'|'fixed', value }
     // Convenience fee — applied on the FINAL amount (net + GST), after discount.
     // { type:'free'|'fixed'|'percentage', value, months, cutThrough }

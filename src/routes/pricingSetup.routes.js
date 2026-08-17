@@ -3,6 +3,8 @@ const { authenticate } = require('../middlewares/auth.middleware');
 const { authenticateStaff } = require('../middlewares/staffAuth.middleware');
 const m = require('../controllers/markupRule.controller');
 const { markupAnalytics } = require('../controllers/markupAnalytics.controller');
+const g = require('../controllers/gstRule.controller');
+const { gstAnalytics } = require('../controllers/gstAnalytics.controller');
 
 /*
   Admin "Pricing Setup Management". Markup Management is the first module;
@@ -31,5 +33,24 @@ router.get('/markup/analytics', authenticate, markupAnalytics);
 router.get('/markup/experience/:experienceId', authenticateStaff, m.effectiveForExperience);
 router.put('/markup/experience/:experienceId', authenticateStaff, m.setExperienceOverride);
 router.delete('/markup/experience/:experienceId', authenticateStaff, m.clearExperienceOverride);
+
+// ── GST & Taxes Management ─────────────────────────────────────────────────
+router.get('/gst/rules', authenticate, g.listRules);
+router.post('/gst/rules', authenticate, g.createRule);
+router.put('/gst/rules/:id', authenticate, g.updateRule);
+router.patch('/gst/rules/:id/toggle', authenticate, g.toggleRule);
+router.delete('/gst/rules/:id', authenticate, g.removeRule);
+
+router.get('/gst/targets', authenticate, g.targets);
+router.get('/gst/effective', authenticate, g.effectiveList);
+router.post('/gst/resync', authenticate, g.resync);
+
+router.get('/gst/analytics', authenticate, gstAnalytics);
+
+// Shared with the Team Portal's go-live pricing modal (the included/double/pure
+// decision is Center Ops's to make, not only the admin's).
+router.get('/gst/experience/:experienceId', authenticateStaff, g.effectiveForExperience);
+router.put('/gst/experience/:experienceId', authenticateStaff, g.setExperienceDecision);
+router.delete('/gst/experience/:experienceId', authenticateStaff, g.clearExperienceDecision);
 
 module.exports = router;
