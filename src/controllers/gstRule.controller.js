@@ -343,11 +343,6 @@ const clearExperienceDecision = asyncHandler(async (req, res) => {
   return ok(res, { gst: resolveGst(fresh, rules) }, 'Back to the global GST');
 });
 
-// ── POST /gst/resync ───────────────────────────────────────────────────────
-const resync = asyncHandler(async (req, res) => {
-  const sync = await syncExperienceGst();
-  return ok(res, { sync }, `GST re-applied — ${sync.updated} experience(s) updated`);
-});
 
 module.exports = {
   listRules,
@@ -360,5 +355,4 @@ module.exports = {
   removeRule,
   setExperienceDecision,
   clearExperienceDecision,
-  resync,
 };

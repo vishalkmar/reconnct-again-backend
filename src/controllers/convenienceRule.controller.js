@@ -324,11 +324,6 @@ const clearExperienceOverride = asyncHandler(async (req, res) => {
   return ok(res, { fee: feeOf(pickRule(fresh, exp)) }, 'Override removed');
 });
 
-// ── POST /convenience/resync ───────────────────────────────────────────────
-const resync = asyncHandler(async (req, res) => {
-  const sync = await syncExperienceConvenience();
-  return ok(res, { sync }, `Convenience fee re-applied — ${sync.updated} experience(s) updated`);
-});
 
 module.exports = {
   listRules,
@@ -341,5 +336,4 @@ module.exports = {
   removeRule,
   setExperienceOverride,
   clearExperienceOverride,
-  resync,
 };

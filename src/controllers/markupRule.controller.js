@@ -311,12 +311,6 @@ const clearExperienceOverride = asyncHandler(async (req, res) => {
   return ok(res, { markup: markupOf(pickRule(fresh, exp)) }, 'Override removed');
 });
 
-// ── POST /markup/resync ────────────────────────────────────────────────────
-// Manual "re-apply everywhere" (also self-heals rows created before this build).
-const resync = asyncHandler(async (req, res) => {
-  const sync = await syncExperienceMarkups();
-  return ok(res, { sync }, `Markup re-applied — ${sync.updated} experience(s) updated`);
-});
 
 module.exports = {
   listRules,
@@ -329,5 +323,4 @@ module.exports = {
   removeRule,
   setExperienceOverride,
   clearExperienceOverride,
-  resync,
 };

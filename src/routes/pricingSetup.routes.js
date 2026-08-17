@@ -28,7 +28,6 @@ router.delete('/markup/rules/:id', authenticate, m.removeRule);
 
 router.get('/markup/targets', authenticate, m.targets);
 router.get('/markup/effective', authenticate, m.effectiveList);
-router.post('/markup/resync', authenticate, m.resync);
 
 router.get('/markup/analytics', authenticate, markupAnalytics);
 
@@ -46,7 +45,6 @@ router.delete('/gst/rules/:id', authenticate, g.removeRule);
 
 router.get('/gst/targets', authenticate, g.targets);
 router.get('/gst/effective', authenticate, g.effectiveList);
-router.post('/gst/resync', authenticate, g.resync);
 
 router.get('/gst/analytics', authenticate, gstAnalytics);
 
@@ -65,7 +63,6 @@ router.delete('/convenience/rules/:id', authenticate, c.removeRule);
 
 router.get('/convenience/targets', authenticate, c.targets);
 router.get('/convenience/effective', authenticate, c.effectiveList);
-router.post('/convenience/resync', authenticate, c.resync);
 
 router.get('/convenience/analytics', authenticate, convenienceAnalytics);
 
