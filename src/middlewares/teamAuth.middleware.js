@@ -13,7 +13,7 @@ const authenticateTeamMember = async (req, res, next) => {
     const token = String(header).replace(/^Bearer\s+/i, '') || null;
     if (!token) return res.status(401).json({ success: false, message: 'Not authenticated' });
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAuthToken(token);
     if (decoded.kind !== 'team_member') {
       return res.status(401).json({ success: false, message: 'Invalid token kind' });
     }

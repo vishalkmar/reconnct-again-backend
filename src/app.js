@@ -12,6 +12,13 @@ const { notFound, errorHandler } = require('./middlewares/error.middleware');
 
 const app = express();
 
+// Behind Render's (and most PaaS) load balancer the real client IP arrives in
+// X-Forwarded-For. Trusting exactly ONE hop lets express-rate-limit key on the
+// true client IP instead of the proxy's — without trusting a spoofable chain of
+// arbitrary length (which `true` would, and which the limiter itself warns
+// against). Every rate limiter below depends on this being correct.
+app.set('trust proxy', 1);
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -103,13 +110,11 @@ app.use(
   express.static(path.join(process.cwd(), uploadDir))
 );
 
+// Health/identity ping. Deliberately minimal — the CORS allow-list and version
+// were previously echoed here, which needlessly handed an attacker the exact
+// set of trusted origins to target. Keep it a bare liveness signal.
 app.get('/', (req, res) =>
-  res.json({
-    success: true,
-    name: 'Retreats by Traveon API',
-    version: '1.0.0',
-    allowedOrigins,
-  })
+  res.json({ success: true, name: 'Retreats by Traveon API' })
 );
 
 app.use('/api', apiRoutes);

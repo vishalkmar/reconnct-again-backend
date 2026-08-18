@@ -2,6 +2,7 @@ const router = require('express').Router();
 const ctrl = require('../controllers/booking.controller');
 const reviewCtrl = require('../controllers/experienceReview.controller');
 const { authenticateUser } = require('../middlewares/userAuth.middleware');
+const { couponTrialLimiter } = require('../middlewares/rateLimit.middleware');
 
 // All booking operations require a signed-in user. Admin-side listing lives
 // under /admin/bookings (added in Phase 8).
@@ -9,8 +10,9 @@ router.use(authenticateUser);
 
 router.post('/preview', ctrl.preview);
 // "Apply coupon" on the app's booking screen — validates the code against this
-// specific experience and returns what it takes off.
-router.post('/coupon-check', ctrl.couponCheck);
+// specific experience and returns what it takes off. Throttled so the endpoint
+// can't be used to enumerate live coupon codes.
+router.post('/coupon-check', couponTrialLimiter, ctrl.couponCheck);
 router.post('/', ctrl.create);
 router.get('/me', ctrl.listMine);
 // Ahead of /me/:code so "pending-review" isn't swallowed as a booking code.

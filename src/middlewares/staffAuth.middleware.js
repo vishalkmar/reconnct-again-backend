@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/jwt');
 const { Admin, TeamMember } = require('../models');
 
 // Lets a route accept EITHER the admin (full access, unaffected — same
@@ -20,7 +21,7 @@ const authenticateStaff = async (req, res, next) => {
     const teamHeader = req.headers['x-team-auth'] || req.headers['X-Team-Auth'];
     const teamToken = teamHeader ? String(teamHeader).replace(/^Bearer\s+/i, '') : null;
     if (teamToken) {
-      const decoded = jwt.verify(teamToken, process.env.JWT_SECRET);
+      const decoded = verifyAuthToken(teamToken);
       if (decoded.kind === 'team_member') {
         const member = await TeamMember.findByPk(decoded.id);
         if (member && member.isActive) {
@@ -33,8 +34,12 @@ const authenticateStaff = async (req, res, next) => {
     const adminHeader = req.headers.authorization || '';
     const adminToken = adminHeader.startsWith('Bearer ') ? adminHeader.slice(7) : null;
     if (adminToken) {
-      const decoded = jwt.verify(adminToken, process.env.JWT_SECRET);
-      if (decoded.kind !== 'team_member') {
+      const decoded = verifyAuthToken(adminToken);
+      // Only a genuine admin token (kind:'admin', or a legacy admin token with
+      // NO kind) may take the admin branch here. A user/supplier token — which
+      // verifies against the same secret — declares its own kind and is turned
+      // away, closing the same escalation as auth.middleware.
+      if (!decoded.kind || decoded.kind === 'admin') {
         const admin = await Admin.findByPk(decoded.id);
         if (admin && admin.isActive) {
           req.admin = admin;

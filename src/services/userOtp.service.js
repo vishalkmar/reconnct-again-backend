@@ -1,11 +1,15 @@
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 const { Op } = require('sequelize');
 const { UserOtpToken } = require('../models');
 
 const OTP_TTL_MIN = parseInt(process.env.USER_OTP_TTL_MIN || process.env.PWA_OTP_TTL_MIN || '10', 10);
 const OTP_MAX_ATTEMPTS = 5;
 
-const generateCode = () => String(Math.floor(100000 + Math.random() * 900000));
+// crypto.randomInt is a CSPRNG — the old Math.random() is seeded predictably
+// and its output can be reconstructed, which would let an attacker anticipate
+// the next login code. Same 6-digit shape, so nothing downstream changes.
+const generateCode = () => String(crypto.randomInt(100000, 1000000));
 
 const issueOtp = async ({ email, purpose = 'login_signup', ipAddress = null }) => {
   const normalized = String(email).toLowerCase().trim();

@@ -16,10 +16,15 @@ const normalize = (email) => String(email || '').toLowerCase().trim();
 
 // ── Phase-1 demo login backdoor ──────────────────────────────────────────
 // A fixed email + OTP so the mobile app can be opened for UI review without a
-// live inbox. NOTE: remove (or gate behind an env flag) before going live.
+// live inbox. It bypasses the real OTP entirely, so it MUST be disabled in
+// production: set DEMO_LOGIN_ENABLED=false (or NODE_ENV=production) and the
+// backdoor stops working — the demo email then has to sign in like any other.
+// Defaults ON so nothing changes for the current app testing.
 const DEMO_EMAIL = 'demo@reconnct.app';
 const DEMO_CODE = '123456';
-const isDemo = (email) => normalize(email) === DEMO_EMAIL;
+const DEMO_LOGIN_ENABLED = process.env.DEMO_LOGIN_ENABLED === 'true'
+  || (process.env.DEMO_LOGIN_ENABLED === undefined && process.env.NODE_ENV !== 'production');
+const isDemo = (email) => DEMO_LOGIN_ENABLED && normalize(email) === DEMO_EMAIL;
 
 const issueAuthToken = (user) =>
   signToken({ id: user.id, kind: 'user', email: user.email }, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });

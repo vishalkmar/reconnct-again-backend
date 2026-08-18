@@ -17,7 +17,10 @@ const login = asyncHandler(async (req, res) => {
   admin.lastLoginAt = new Date();
   await admin.save();
 
-  const token = signToken({ id: admin.id, role: admin.role });
+  // kind:'admin' lets every auth middleware tell an admin token apart from the
+  // user / supplier / team tokens that share this signing secret — see
+  // middlewares/auth.middleware.js.
+  const token = signToken({ id: admin.id, role: admin.role, kind: 'admin' });
   return ok(res, { token, admin: admin.toSafeJSON() }, 'Logged in');
 });
 

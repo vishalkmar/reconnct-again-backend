@@ -2,6 +2,7 @@ const router = require('express').Router();
 const rateLimit = require('express-rate-limit');
 const ctrl = require('../controllers/userAuth.controller');
 const { authenticateUser } = require('../middlewares/userAuth.middleware');
+const { credentialLimiter } = require('../middlewares/rateLimit.middleware');
 
 // Tight limiter on OTP issuance so the inbox can't be flooded.
 const otpLimiter = rateLimit({
@@ -14,7 +15,9 @@ const otpLimiter = rateLimit({
 
 router.post('/request-otp', otpLimiter, ctrl.requestOtp);
 router.post('/resend-otp', otpLimiter, ctrl.resendOtp);
-router.post('/verify-otp', ctrl.verifyOtp);
+// The 6-digit OTP is only ~1M wide, so cap wrong guesses per (IP + email) —
+// complements the 5-attempt cap already enforced per OTP token in the service.
+router.post('/verify-otp', credentialLimiter, ctrl.verifyOtp);
 
 router.post('/complete-profile', authenticateUser, ctrl.completeProfile);
 router.get('/me', authenticateUser, ctrl.me);

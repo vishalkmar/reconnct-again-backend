@@ -1,4 +1,5 @@
 const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/jwt');
 const { User } = require('../models');
 
 const stripBearer = (v) => (String(v).startsWith('Bearer ') ? String(v).slice(7) : String(v));
@@ -27,7 +28,7 @@ const authenticateUser = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Not authenticated' });
     }
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAuthToken(token);
     if (decoded.kind !== 'user') {
       return res.status(401).json({ success: false, message: 'Invalid token kind' });
     }
@@ -51,7 +52,7 @@ const optionalUser = async (req, res, next) => {
   try {
     const token = extractToken(req);
     if (!token) return next();
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    const decoded = verifyAuthToken(token);
     if (decoded.kind === 'user') {
       const user = await User.findByPk(decoded.id);
       if (user && user.isActive) req.user = user;

@@ -27,7 +27,7 @@ const initReviewSocket = (io) => {
       const token = socket.handshake.auth?.token
         || socket.handshake.headers?.authorization?.replace(/^Bearer\s+/i, '');
       if (!token) return next(new Error('unauthenticated'));
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const decoded = verifyAuthToken(token);
       if (decoded.pwa) return next(new Error('invalid token'));
 
       if (decoded.kind === 'team_member') {
