@@ -174,11 +174,15 @@ const realReviews = async (experienceId) => {
 };
 
 const hostBadge = async (j) => {
+  // The "show provider publicly" toggle must apply to BOTH kinds of provider —
+  // a host's personal phone was previously exposed even when the listing was
+  // set to hide its provider, while the supplier branch already respected it.
+  if (j.showSupplierPublic === false) return null;
   if (j.ownerUserId) {
     const owner = await User.findByPk(j.ownerUserId, { attributes: ['id', 'name', 'company', 'avatarUrl', 'phone'] });
     if (owner) return { id: owner.id, name: owner.company || owner.name || 'Host', image: owner.avatarUrl || null, phone: owner.phone || null, verified: true };
   }
-  return (j.showSupplierPublic !== false && j.supplier)
+  return j.supplier
     ? { id: j.supplier.id, name: j.supplier.supplierName || j.supplier.companyName, image: j.supplier.image, phone: j.supplier.phone || null }
     : null;
 };

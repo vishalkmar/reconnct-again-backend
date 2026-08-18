@@ -17,7 +17,10 @@ const extractToken = (req) => {
   // Last resort: a `?token=` query param. Only needed for links opened by the
   // OS (e.g. the app's "Download voucher" button uses Linking.openURL, which
   // can't attach a custom header) — never required for normal fetch() calls.
-  if (req.query && req.query.token) return stripBearer(req.query.token);
+  // Restricted to GET (all such links are downloads) so a token that leaks into
+  // a URL can never be replayed to mutate anything; and it's redacted from
+  // access logs (see app.js). Normal API calls always use the header.
+  if (req.method === 'GET' && req.query && req.query.token) return stripBearer(req.query.token);
   return null;
 };
 

@@ -89,8 +89,16 @@ app.use(
   })
 );
 
+// Some links opened by the OS (the app's "Download voucher" button) carry the
+// auth token in the URL query — those URLs land in the access log verbatim,
+// leaking a working token to anyone who can read logs. Redact any sensitive
+// query param before morgan formats the line. Purely a logging change; the
+// request itself is untouched.
+morgan.token('safeurl', (req) => String(req.originalUrl || req.url || '')
+  .replace(/([?&])(token|access_token|api_key|apikey|password|otp)=[^&]*/gi, '$1$2=[redacted]'));
+
 if (process.env.NODE_ENV !== 'test') {
-  app.use(morgan('dev'));
+  app.use(morgan(':method :safeurl :status :response-time ms - :res[content-length]'));
 }
 
 app.use(

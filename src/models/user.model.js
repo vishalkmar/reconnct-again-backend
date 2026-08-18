@@ -76,6 +76,10 @@ const User = sequelize.define(
 
 User.prototype.toSafeJSON = function () {
   const obj = this.toJSON();
+  // A user has no password (OTP login), but the FCM push token is a device
+  // handle that should never travel in an API response — strip it, matching the
+  // other account models' toSafeJSON.
+  delete obj.fcmToken;
   return obj;
 };
 

@@ -13,14 +13,29 @@ const MAX_SIZE_MB = parseInt(process.env.MAX_FILE_SIZE_MB || '50', 10);
 const MAX_IMAGE_MB = parseInt(process.env.MAX_IMAGE_SIZE_MB || '5', 10);
 const MAX_IMAGE_BYTES = MAX_IMAGE_MB * 1024 * 1024;
 
-const DEFAULT_ALLOWED = /jpeg|jpg|png|gif|webp|svg|mp4|webm|mov|avi/;
+// SVG is deliberately NOT allowed: an SVG can carry <script>/onload, so an
+// uploaded one served back becomes stored XSS the moment it's opened or embedded
+// inline. Raster images + video only. (No route legitimately uploads SVG.)
+const DEFAULT_ALLOWED = /jpeg|jpg|png|gif|webp|mp4|webm|mov|avi/;
 
 const createFileFilter = ({
   allowed = DEFAULT_ALLOWED,
   message = 'Only image and video files are allowed',
 } = {}) => (req, file, cb) => {
+  // Hard block for the SVG/HTML XSS carriers regardless of the extension a
+  // caller claims — a file named ".png" but served as image/svg+xml would
+  // otherwise slip through the ext check below. Anchored so it hits ONLY the
+  // dangerous types and not, say, DOCX (application/vnd.openxmlformats-…) which
+  // legitimately contains "xml".
+  const mimetype = String(file.mimetype || '').toLowerCase();
   const ext = path.extname(file.originalname).toLowerCase().replace('.', '');
-  const ok = allowed.test(ext) || allowed.test(file.mimetype);
+  const DANGEROUS_MIME = /^(image\/svg|text\/html|text\/xml|application\/xhtml|application\/xml)/;
+  if (DANGEROUS_MIME.test(mimetype) || ext === 'svg' || ext === 'html' || ext === 'htm' || ext === 'xhtml') {
+    const err = new Error('SVG/HTML files are not allowed');
+    err.status = 400;
+    return cb(err);
+  }
+  const ok = allowed.test(ext) || allowed.test(mimetype);
   if (ok) return cb(null, true);
   const err = new Error(message);
   err.status = 400;

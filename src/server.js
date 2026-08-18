@@ -343,6 +343,10 @@ const runBackgroundDbWork = async () => {
 };
 
 const start = async () => {
+  // 0) Fail fast on an insecure secret (aborts in production, warns in dev)
+  //    BEFORE anything issues or verifies a token. See config/securityCheck.js.
+  require('./config/securityCheck').runSecurityChecks();
+
   // 1) Only the bare minimum before listen: a working DB connection.
   await connectDB();
 
