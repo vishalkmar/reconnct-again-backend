@@ -60,6 +60,8 @@ const ReviewNotification = require('./reviewNotification.model');
 const MarkupRule = require('./markupRule.model');
 const GstRule = require('./gstRule.model');
 const ConvenienceRule = require('./convenienceRule.model');
+const FraudEvent = require('./fraudEvent.model');
+const FraudBlockedEmail = require('./fraudBlockedEmail.model');
 
 const db = {
   sequelize,
@@ -124,6 +126,8 @@ const db = {
   MarkupRule,
   GstRule,
   ConvenienceRule,
+  FraudEvent,
+  FraudBlockedEmail,
 };
 
 // ─── Users: self-reference for referrals ──────────────────────────────────

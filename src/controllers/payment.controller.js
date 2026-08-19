@@ -88,6 +88,14 @@ const confirmBookingFromCashfree = async (booking, cfOrder) => {
   booking.lastPaymentStatus = null;
   await booking.save();
 
+  // Payment-fraud check — fire-and-forget so it can NEVER delay or break a
+  // legitimate confirmation. Compares what the gateway collected vs what the
+  // server said the booking should cost; raises an alert + freezes the account
+  // if it was tampered down. See services/fraudDetection.service.js.
+  require('../services/fraudDetection.service')
+    .evaluateBookingPayment({ booking, cfOrder })
+    .catch((err) => console.error('[payment] fraud evaluation failed:', err.message));
+
   // Fire-and-forget email so a flaky SMTP doesn't make a successful payment
   // look like a failure. Logged for debugging.
   sendBookingConfirmation({ booking })

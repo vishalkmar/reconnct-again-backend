@@ -358,6 +358,7 @@ const start = async () => {
   const io = initSocket(httpServer);
   initSupportSocket(io); // /support namespace (customer support chat)
   initReviewSocket(io); // /review namespace (experience-review real-time)
+  require('./services/securitySocket').initSecuritySocket(io); // /security (admin fraud alerts)
 
   httpServer.listen(PORT, () => {
     console.log(`[SERVER] Running on http://localhost:${PORT}`);

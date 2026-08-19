@@ -3,6 +3,7 @@ const { Booking, User, Review } = require('../models');
 const { ok, fail, created } = require('../utils/response');
 const { sendPushToUser } = require('../services/push.service');
 const { ensureCsmAssigned } = require('../services/csm.service');
+const { captureClientContext } = require('../utils/clientContext');
 const {
   ALLOWED_TYPES,
   fetchItem,
@@ -398,6 +399,10 @@ const create = asyncHandler(async (req, res) => {
     tcsPaise: pricing.tcsPaise,
     taxPaise: pricing.taxPaise,
     conveniencePaise: pricing.conveniencePaise,
+    // Fraud-detection only — the user's real IP/device at booking time, so a
+    // later gateway-amount tamper can be attributed. Never read by any
+    // customer-facing flow. Best-effort; failure here never blocks a booking.
+    clientContext: (() => { try { return captureClientContext(req); } catch { return null; } })(),
     walletDiscountPaise: pricing.walletDiscountPaise,
     couponDiscountPaise: pricing.couponDiscountPaise,
     couponCode: couponCodeApplied,

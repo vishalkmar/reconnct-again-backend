@@ -7,6 +7,7 @@ const { issueOtp, verifyOtp, OTP_TTL_MIN } = require('../services/userOtp.servic
 const { sendUserOtp, sendUserWelcome } = require('../services/userMailer.service');
 const { normalizePhone } = require('../services/cashfree.service');
 const { creditReferrerForFirstLogin } = require('../services/referEarn.service');
+const { isEmailBlocked } = require('../services/fraudDetection.service');
 // NOTE: v3 referral system (Jun 2026) — referrer is paid the moment the
 // referee completes their profile (effectively "first login"). Booking is
 // no longer the trigger. The payment hook still calls the legacy v2 path
@@ -68,6 +69,12 @@ const requestOtp = asyncHandler(async (req, res) => {
   const email = normalize(req.body.email);
   if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
     return fail(res, 'Please provide a valid email address', 400);
+  }
+
+  // Fraud freeze: an email flagged for a manipulated payment can neither log in
+  // NOR re-register — no OTP is issued. Only an admin can lift the freeze.
+  if (await isEmailBlocked(email)) {
+    return fail(res, 'This account has been frozen due to a payment issue. Please contact support.', 403);
   }
 
   // Demo account: never send a real email, just let the app move to the OTP
@@ -134,6 +141,12 @@ const verifyOtpCtrl = asyncHandler(async (req, res) => {
   const email = normalize(req.body.email);
   const code = String(req.body.code || '').trim();
   if (!email || !code) return fail(res, 'Email and code are required', 400);
+
+  // Defense-in-depth: even if a code was somehow obtained, a frozen email can't
+  // complete sign-in.
+  if (await isEmailBlocked(email)) {
+    return fail(res, 'This account has been frozen due to a payment issue. Please contact support.', 403);
+  }
 
   // Demo account bypass — accept the fixed code, skip the OTP store entirely.
   const result = (isDemo(email) && code === DEMO_CODE)

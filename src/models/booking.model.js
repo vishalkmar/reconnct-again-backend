@@ -138,6 +138,11 @@ const Booking = sequelize.define(
       type: DataTypes.ENUM('none', 'pending', 'processing', 'completed', 'failed'),
       defaultValue: 'none',
     },
+    // Captured at booking creation for the fraud-detection system only (never
+    // shown to the customer): { ip, userAgent, systemInfo, deviceId, location,
+    // network, capturedAt }. Nullable + additive — no existing flow reads it.
+    clientContext: { type: DataTypes.JSON, allowNull: true },
+
     cashfreeRefundId: { type: DataTypes.STRING(120), allowNull: true },
     refundRaw: {
       type: DataTypes.JSON,
