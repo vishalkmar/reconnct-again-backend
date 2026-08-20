@@ -52,7 +52,14 @@ const has2FA = (admin) => enabledFactors(admin).length > 0;
 // ── Email OTP ───────────────────────────────────────────────────────────────
 const generateCode = () => String(crypto.randomInt(100000, 1000000));
 
-// Create + store + email a fresh code to the admin's own address.
+// The inbox codes are delivered to — the dedicated 2FA email if set, else the
+// login email.
+const otpRecipient = (admin) => admin.twoFactorEmail || admin.email;
+
+// A masked hint (t***@gmail.com) for the login screen.
+const maskEmail = (e) => String(e || '').replace(/^(.).*(@.*)$/, '$1***$2');
+
+// Create + store + email a fresh code to the admin's 2FA inbox.
 const sendEmailOtp = async (admin) => {
   const code = generateCode();
   admin.twoFactorOtpHash = await bcrypt.hash(code, 8);
@@ -69,7 +76,7 @@ const sendEmailOtp = async (admin) => {
       <p style="color:#94a3b8;font-size:12px;margin:0;">Expires in ${OTP_TTL_MIN} minutes. If this wasn't you, change your admin password immediately.</p>
     `,
   });
-  await send({ to: admin.email, subject: `reconnct admin code: ${code}`, html, text: `Your admin code: ${code}` });
+  await send({ to: otpRecipient(admin), subject: `reconnct admin code: ${code}`, html, text: `Your admin code: ${code}` });
   return true;
 };
 
@@ -142,6 +149,8 @@ module.exports = {
   verifyChallenge,
   enabledFactors,
   has2FA,
+  otpRecipient,
+  maskEmail,
   sendEmailOtp,
   verifyEmailOtp,
   startTotpSetup,

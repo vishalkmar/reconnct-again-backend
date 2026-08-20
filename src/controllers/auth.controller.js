@@ -33,7 +33,7 @@ const login = asyncHandler(async (req, res) => {
       requires2fa: true,
       factors, // e.g. ['email','totp']
       challengeToken: twoFa.issueChallenge(admin),
-      emailHint: admin.twoFactorEmailEnabled ? admin.email.replace(/^(.).*(@.*)$/, '$1***$2') : null,
+      emailHint: admin.twoFactorEmailEnabled ? twoFa.maskEmail(twoFa.otpRecipient(admin)) : null,
     }, 'Additional verification required');
   }
 

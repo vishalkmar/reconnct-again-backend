@@ -146,18 +146,27 @@ const simulate = asyncHandler(async (req, res) => {
 
 // GET /api/admin/security/2fa/status
 const twoFaStatus = asyncHandler(async (req, res) => ok(res, {
-  email: req.admin.email,
+  email: req.admin.email, // login email
+  twoFactorEmail: req.admin.twoFactorEmail || req.admin.email, // where codes go
   emailEnabled: !!req.admin.twoFactorEmailEnabled,
   totpEnabled: !!req.admin.totpEnabled,
   totpPending: !!req.admin.totpPendingSecret,
 }));
 
-// POST /api/admin/security/2fa/email/enable — sends a confirmation code to the
-// admin's own email; must be confirmed before it's switched on.
+// POST /api/admin/security/2fa/email/enable  { email? }
+// Sends a confirmation code to the chosen 2FA inbox (defaults to the login
+// email). It must be confirmed before email-2FA is switched on. The chosen
+// address is remembered so codes always go there.
 const enableEmail2fa = asyncHandler(async (req, res) => {
   if (req.admin.twoFactorEmailEnabled) return ok(res, {}, 'Email verification is already on');
+  const chosen = String(req.body.email || '').toLowerCase().trim();
+  if (chosen) {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(chosen)) return fail(res, 'Enter a valid email address', 400);
+    req.admin.twoFactorEmail = chosen;
+    await req.admin.save();
+  }
   await twoFa.sendEmailOtp(req.admin);
-  return ok(res, { email: req.admin.email }, 'A confirmation code was emailed to you');
+  return ok(res, { email: twoFa.otpRecipient(req.admin) }, `A confirmation code was sent to ${twoFa.otpRecipient(req.admin)}`);
 });
 
 // POST /api/admin/security/2fa/email/confirm { code }

@@ -41,6 +41,10 @@ const Admin = sequelize.define(
     // before an admin token is issued. All additive + nullable → no existing
     // admin login changes until the admin turns something on.
     twoFactorEmailEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+    // Where email-2FA codes are DELIVERED. Separate from the login `email` so an
+    // admin can receive codes at a real inbox they control. Falls back to the
+    // login email when not set.
+    twoFactorEmail: { type: DataTypes.STRING(180), allowNull: true },
     totpEnabled: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
     // The confirmed authenticator secret (base32). Never sent to the client
     // after setup (toSafeJSON strips it).
