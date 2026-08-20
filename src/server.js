@@ -272,6 +272,16 @@ const runBackgroundDbWork = async () => {
   }
 
   try {
+    const { migrate: migratePricingAndSecurity } = require('./scripts/migratePricingAndSecuritySchema');
+    const result = await migratePricingAndSecurity();
+    if (result.changes?.length) {
+      console.log(`[DB] Pricing/security schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.warn('[DB] Pricing/security migration failed (non-fatal):', err.message);
+  }
+
+  try {
     const { seed: seedChecklist } = require('./scripts/seedChecklist');
     const result = await seedChecklist();
     if (result.inserted) {
