@@ -158,6 +158,30 @@ const emailUser = (ev) => {
   return send({ to: ev.userEmail, subject: 'Action required: an issue with your payment', html, text: 'A fraudulent/manipulated payment was detected on your booking; your account has been frozen.' });
 };
 
+// Shared tail: freeze the account, push the real-time alert, and send the two
+// emails. Used by BOTH the real detection and the admin test simulation, so a
+// test exercises the exact same pipeline that a genuine fraud does.
+const raiseFraud = async (ev, ctx) => {
+  await freezeEmail({
+    email: ev.userEmail, reason: `Payment fraud on ${ev.bookingCode}`, bookingCode: ev.bookingCode, fraudEventId: ev.id,
+  }).catch((e) => console.error('[fraud] freeze failed:', e.message));
+
+  emitSecurity('fraud:new', {
+    id: ev.id,
+    bookingCode: ev.bookingCode,
+    userEmail: ev.userEmail,
+    userName: ev.userName,
+    expected: ev.expectedPaise / 100,
+    paid: ev.paidPaise / 100,
+    shortfall: ev.shortfallPaise / 100,
+    detectedAt: ev.detectedAt,
+    simulated: !!ev.itemDetails?.simulated,
+  });
+
+  emailAdmin(ev, ctx || ev.clientContext || {}).catch((e) => console.error('[fraud] admin email failed:', e.message));
+  emailUser(ev).catch((e) => console.error('[fraud] user email failed:', e.message));
+};
+
 // ── Main entry ──────────────────────────────────────────────────────────────
 /*
   Call AFTER a booking is confirmed. Returns the FraudEvent if one was raised,
@@ -213,26 +237,8 @@ const evaluateBookingPayment = async ({ booking, cfOrder }) => {
       detectedAt: new Date(),
     });
 
-    // Freeze the account (email-keyed → also blocks re-registration).
-    await freezeEmail({
-      email: ev.userEmail, reason: `Payment fraud on ${ev.bookingCode}`, bookingCode: ev.bookingCode, fraudEventId: ev.id,
-    }).catch((e) => console.error('[fraud] freeze failed:', e.message));
-
-    // Real-time push to any connected admin.
-    emitSecurity('fraud:new', {
-      id: ev.id,
-      bookingCode: ev.bookingCode,
-      userEmail: ev.userEmail,
-      userName: ev.userName,
-      expected: expectedPaise / 100,
-      paid: paidPaise / 100,
-      shortfall: shortfall / 100,
-      detectedAt: ev.detectedAt,
-    });
-
-    // Emails (fire-and-forget).
-    emailAdmin(ev, ctx).catch((e) => console.error('[fraud] admin email failed:', e.message));
-    emailUser(ev).catch((e) => console.error('[fraud] user email failed:', e.message));
+    // Freeze + alert + emails (same pipeline the test simulation uses).
+    await raiseFraud(ev, ctx);
 
     console.warn(`[fraud] DETECTED on ${ev.bookingCode}: paid ${paidPaise} vs expected ${expectedPaise} (short ${shortfall})`);
     return ev;
@@ -242,8 +248,57 @@ const evaluateBookingPayment = async ({ booking, cfOrder }) => {
   }
 };
 
+/*
+  Admin test tool — reproduce the ENTIRE fraud pipeline (event → freeze →
+  admin+user email → real-time socket) on the live platform, without needing
+  Burp/MITM. Uses a caller-supplied test email as the "fraudster" so nothing
+  touches a real customer. Only reachable when FRAUD_TEST_ENABLED=true and by an
+  admin (gated at the route). `simulated:true` is stamped so it can't be mistaken
+  for a genuine case.
+*/
+const simulateFraudEvent = async ({
+  email, name, expectedPaise, paidPaise, ctx,
+}) => {
+  const cleanEmail = String(email || '').toLowerCase().trim();
+  const exp = Math.max(0, Math.round(Number(expectedPaise) || 0));
+  const paid = Math.max(0, Math.round(Number(paidPaise) || 0));
+  const shortfall = Math.max(0, exp - paid);
+  const context = {
+    ip: '203.0.113.10 (simulated)',
+    userAgent: 'Simulated test — Admin Security dashboard',
+    systemInfo: 'Test simulation',
+    deviceId: 'test-device',
+    location: 'Test',
+    network: 'test',
+    capturedAt: new Date().toISOString(),
+    ...(ctx || {}),
+  };
+
+  const ev = await FraudEvent.create({
+    userEmail: cleanEmail || null,
+    userName: name || 'Test user',
+    userPhone: null,
+    bookingCode: `SIM-${Date.now().toString(36).toUpperCase()}`,
+    currency: 'INR',
+    expectedPaise: exp,
+    paidPaise: paid,
+    shortfallPaise: shortfall,
+    reason: 'amount_tampered',
+    severity: 'high',
+    paymentDetails: { method: 'simulated', bank: 'Test Bank', paymentId: 'SIM-PAY', orderAmount: paid / 100 },
+    itemDetails: { name: 'Simulated booking (test)', simulated: true, bookedAt: new Date().toISOString() },
+    clientContext: context,
+    status: 'open',
+    detectedAt: new Date(),
+  });
+
+  await raiseFraud(ev, context);
+  return ev;
+};
+
 module.exports = {
   evaluateBookingPayment,
+  simulateFraudEvent,
   isEmailBlocked,
   freezeEmail,
   paidPaiseFromOrder,

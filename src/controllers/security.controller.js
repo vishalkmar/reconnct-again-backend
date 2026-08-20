@@ -114,6 +114,32 @@ const unfreezeByEmail = asyncHandler(async (req, res) => {
   return ok(res, { email }, 'Account unfrozen');
 });
 
+// Whether the admin test simulation is available on this server.
+const TEST_ENABLED = () => process.env.FRAUD_TEST_ENABLED === 'true';
+
+// GET /api/admin/security/config — lets the dashboard show/hide the test tool.
+const config = asyncHandler(async (req, res) => ok(res, { testEnabled: TEST_ENABLED() }));
+
+/*
+  POST /api/admin/security/simulate  { email, name?, expected, paid }
+  Runs the FULL fraud pipeline against a supplied TEST email so the admin can
+  verify detection + freeze + emails + real-time alert on the live platform
+  without Burp. Env-gated (FRAUD_TEST_ENABLED=true) + admin-only.
+*/
+const simulate = asyncHandler(async (req, res) => {
+  if (!TEST_ENABLED()) return fail(res, 'Fraud testing is disabled on this server. Set FRAUD_TEST_ENABLED=true to enable it.', 403);
+  const email = String(req.body.email || '').toLowerCase().trim();
+  if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return fail(res, 'A valid test email is required', 400);
+  const expected = Math.round((Number(req.body.expected) || 0) * 100);
+  const paid = Math.round((Number(req.body.paid) || 0) * 100);
+  if (expected <= 0) return fail(res, 'Expected amount must be greater than 0', 400);
+  if (paid >= expected) return fail(res, 'Paid must be LESS than expected to simulate fraud', 400);
+
+  const { simulateFraudEvent } = require('../services/fraudDetection.service');
+  const ev = await simulateFraudEvent({ email, name: req.body.name, expectedPaise: expected, paidPaise: paid });
+  return ok(res, { id: ev.id, bookingCode: ev.bookingCode, email }, 'Simulated fraud raised — check the list, the admin inbox, and this test email. The test account is now frozen (unfreeze it from the case).');
+});
+
 module.exports = {
-  listFraud, getFraud, updateFraudStatus, listFrozen, unfreeze, unfreezeByEmail,
+  listFraud, getFraud, updateFraudStatus, listFrozen, unfreeze, unfreezeByEmail, config, simulate,
 };
