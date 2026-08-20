@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const { FraudEvent, FraudBlockedEmail, User } = require('../models');
 const { ok, fail } = require('../utils/response');
+const twoFa = require('../services/adminTwoFactor.service');
 
 /*
   Admin → Security → Payment Fraud Detection.
@@ -140,6 +141,70 @@ const simulate = asyncHandler(async (req, res) => {
   return ok(res, { id: ev.id, bookingCode: ev.bookingCode, email }, 'Simulated fraud raised — check the list, the admin inbox, and this test email. The test account is now frozen (unfreeze it from the case).');
 });
 
+// ─── Admin Two-Factor / MFA setup (Security tab) ─────────────────────────────
+// req.admin is the signed-in admin configuring their OWN factors.
+
+// GET /api/admin/security/2fa/status
+const twoFaStatus = asyncHandler(async (req, res) => ok(res, {
+  email: req.admin.email,
+  emailEnabled: !!req.admin.twoFactorEmailEnabled,
+  totpEnabled: !!req.admin.totpEnabled,
+  totpPending: !!req.admin.totpPendingSecret,
+}));
+
+// POST /api/admin/security/2fa/email/enable — sends a confirmation code to the
+// admin's own email; must be confirmed before it's switched on.
+const enableEmail2fa = asyncHandler(async (req, res) => {
+  if (req.admin.twoFactorEmailEnabled) return ok(res, {}, 'Email verification is already on');
+  await twoFa.sendEmailOtp(req.admin);
+  return ok(res, { email: req.admin.email }, 'A confirmation code was emailed to you');
+});
+
+// POST /api/admin/security/2fa/email/confirm { code }
+const confirmEmail2fa = asyncHandler(async (req, res) => {
+  const r = await twoFa.verifyEmailOtp(req.admin, req.body.code);
+  if (!r.ok) return fail(res, r.reason || 'Incorrect code', 400);
+  req.admin.twoFactorEmailEnabled = true;
+  await req.admin.save();
+  return ok(res, {}, 'Email verification is now on');
+});
+
+// POST /api/admin/security/2fa/email/disable { password }
+const disableEmail2fa = asyncHandler(async (req, res) => {
+  const okPass = await req.admin.comparePassword(String(req.body.password || ''));
+  if (!okPass) return fail(res, 'Your password is required to turn this off', 400);
+  req.admin.twoFactorEmailEnabled = false;
+  req.admin.twoFactorOtpHash = null;
+  req.admin.twoFactorOtpExpires = null;
+  await req.admin.save();
+  return ok(res, {}, 'Email verification turned off');
+});
+
+// POST /api/admin/security/2fa/totp/setup — returns QR + manual key to scan.
+const setupTotp = asyncHandler(async (req, res) => {
+  const data = await twoFa.startTotpSetup(req.admin);
+  return ok(res, data, 'Scan the QR in your authenticator app, then enter a code to confirm');
+});
+
+// POST /api/admin/security/2fa/totp/confirm { code }
+const confirmTotp = asyncHandler(async (req, res) => {
+  const r = await twoFa.confirmTotpSetup(req.admin, req.body.code);
+  if (!r.ok) return fail(res, r.reason || 'Incorrect code', 400);
+  return ok(res, {}, 'Authenticator app is now on');
+});
+
+// POST /api/admin/security/2fa/totp/disable { password }
+const disableTotp = asyncHandler(async (req, res) => {
+  const okPass = await req.admin.comparePassword(String(req.body.password || ''));
+  if (!okPass) return fail(res, 'Your password is required to turn this off', 400);
+  req.admin.totpEnabled = false;
+  req.admin.totpSecret = null;
+  req.admin.totpPendingSecret = null;
+  await req.admin.save();
+  return ok(res, {}, 'Authenticator app turned off');
+});
+
 module.exports = {
   listFraud, getFraud, updateFraudStatus, listFrozen, unfreeze, unfreezeByEmail, config, simulate,
+  twoFaStatus, enableEmail2fa, confirmEmail2fa, disableEmail2fa, setupTotp, confirmTotp, disableTotp,
 };

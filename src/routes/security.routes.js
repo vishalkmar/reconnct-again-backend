@@ -17,4 +17,13 @@ router.post('/unfreeze-email', authenticate, c.unfreezeByEmail);
 router.get('/config', authenticate, c.config);
 router.post('/simulate', authenticate, c.simulate);
 
+// ── Two-Factor / MFA setup (the signed-in admin configures their own) ───────
+router.get('/2fa/status', authenticate, c.twoFaStatus);
+router.post('/2fa/email/enable', authenticate, c.enableEmail2fa);
+router.post('/2fa/email/confirm', authenticate, c.confirmEmail2fa);
+router.post('/2fa/email/disable', authenticate, c.disableEmail2fa);
+router.post('/2fa/totp/setup', authenticate, c.setupTotp);
+router.post('/2fa/totp/confirm', authenticate, c.confirmTotp);
+router.post('/2fa/totp/disable', authenticate, c.disableTotp);
+
 module.exports = router;

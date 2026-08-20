@@ -41,9 +41,11 @@
     "mysql2": "^3.11.5",
     "nodemailer": "^9.0.5",
     "pdf-lib": "^1.17.1",
+    "qrcode": "^1.5.4",
     "sequelize": "^6.37.5",
     "slugify": "^1.6.6",
     "socket.io": "^4.8.3",
+    "speakeasy": "^2.0.0",
     "uuid": "^11.0.3"
   },
   "devDependencies": {
