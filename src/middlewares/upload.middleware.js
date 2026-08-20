@@ -1,6 +1,7 @@
 const multer = require('multer');
 const path = require('path');
 const { cloudinary, ROOT_FOLDER, isConfigured } = require('../config/cloudinary');
+const { verifyContent } = require('../utils/fileSignature');
 
 // Outer safety net for the whole multipart body (images + videos + docs) —
 // generous, since videos legitimately need more room.
@@ -101,12 +102,24 @@ const guessResourceType = (file) => {
  * and attach the secure URL to file.path so downstream code can read
  * a uniform `file.path` regardless of storage backend.
  */
-const cloudinaryStreamUploader = (subfolder) => async (req, res, next) => {
+const cloudinaryStreamUploader = (subfolder, allowed = DEFAULT_ALLOWED) => async (req, res, next) => {
   try {
     const folder = `${ROOT_FOLDER}/${subfolder}`;
 
     const uploadOne = async (file) => {
       if (!file?.buffer) return;
+
+      // Magic-byte check — the ONLY trustworthy signal. Rejects a renamed
+      // executable/script (e.g. virus.exe → resume.pdf with a spoofed MIME):
+      // its real bytes aren't a PDF, so it never reaches storage. Runs here
+      // because multer's fileFilter can't see the buffer.
+      const sig = verifyContent(file.buffer, allowed);
+      if (!sig.ok) {
+        const err = new Error(sig.reason);
+        err.status = 400;
+        throw err;
+      }
+
       const resourceType = guessResourceType(file);
       if (resourceType === 'image' && file.buffer.length > MAX_IMAGE_BYTES) {
         const mb = (file.buffer.length / (1024 * 1024)).toFixed(1);
@@ -158,7 +171,8 @@ const buildUploader = (subfolder = 'misc', options = {}) => {
   if (!isConfigured()) {
     console.warn('[CLOUDINARY] credentials missing — uploads will fail until set in .env');
   }
-  const cloudinaryStep = cloudinaryStreamUploader(subfolder);
+  // The magic-byte check uses the SAME allow-list the fileFilter does.
+  const cloudinaryStep = cloudinaryStreamUploader(subfolder, options.allowed || DEFAULT_ALLOWED);
   const upload = createMulter(options);
 
   return {
