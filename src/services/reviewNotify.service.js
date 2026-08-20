@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/jwt');
 const { ReviewNotification, TeamMember } = require('../models');
 
 /*

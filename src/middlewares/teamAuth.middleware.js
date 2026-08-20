@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { verifyAuthToken } = require('../utils/jwt');
 const { TeamMember } = require('../models');
 const { availableRolesFor } = require('../models/teamMember.model');
 
