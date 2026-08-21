@@ -38,8 +38,10 @@ const convenienceAmount = (afterGst, fee) => {
 
   Normally that's the quoted B2B price as-is. The exception is 'pure' mode: the
   adder quoted a GST-INCLUSIVE price and Center Ops chose to strip their tax out
-  rather than tax it again, so the taxable base is the price de-grossed by the
-  rate they quoted:  base ÷ (1 + theirRate/100).
+  rather than tax it again. Per the business rule chosen, the supplier's GST is
+  removed as a flat percentage OF the quoted price:
+       base = quoted − quoted × theirRate/100  =  quoted × (1 − theirRate/100).
+  e.g. ₹2000 @18% → 2000 × 0.82 = ₹1640.
 
   In 'double' mode we deliberately leave their GST inside the base — that IS the
   "tax on tax" the mode is named after, chosen knowingly at go-live.
@@ -50,7 +52,7 @@ const taxableBase = (base, exp) => {
   if (cfg.mode !== 'pure') return b;
   const theirRate = Number(cfg.submittedRate ?? (exp && exp.pricing && exp.pricing.gstIncludedRate)) || 0;
   if (theirRate <= 0) return b;
-  return b / (1 + theirRate / 100);
+  return b * (1 - theirRate / 100);
 };
 
 // The markup amount (in the same unit as `base`) for a given markup config.

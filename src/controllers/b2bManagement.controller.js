@@ -4,7 +4,7 @@ const {
   Experience, Booking, Supplier, User, TeamMember, ExperienceCategory, ExperienceType,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
-const { withMarkup } = require('../utils/goLivePricing');
+const { withMarkup, taxableBase } = require('../utils/goLivePricing');
 
 /*
   Admin "B2B Management" — a command centre over every LIVE experience.
@@ -27,8 +27,10 @@ const isPaid = (bk) => PAID.includes(bk.status);
 
 // The final per-adult price. ORDER: base + markup − discount → +convenience
 // → +GST (GST applies on the amount that already includes the convenience fee).
+// In 'pure' GST mode the supplier's own included GST is stripped off the base
+// FIRST (taxableBase) so we don't tax an already-taxed amount.
 const finalAdultPrice = (exp) => {
-  const raw = Number(exp.pricing?.adultPrice) || 0;
+  const raw = taxableBase(Number(exp.pricing?.adultPrice) || 0, exp);
   if (raw <= 0) return 0;
   const base = withMarkup(raw, exp.markup); // markup applies first, on the base
   const disc = exp.discount;
