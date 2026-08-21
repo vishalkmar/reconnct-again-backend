@@ -7,7 +7,7 @@ const { ok, created, fail } = require('../utils/response');
 const {
   MODES, loadRules, pickRule, matches, matchingRules, resolveGst, syncExperienceGst,
 } = require('../services/gstRule.service');
-const { taxableBase, withMarkup } = require('../utils/goLivePricing');
+const { taxableBase, withMarkup, convenienceAmount } = require('../utils/goLivePricing');
 const { findGlobalRules, collapseGlobalRules } = require('../utils/singleGlobalRule');
 
 /*
@@ -60,18 +60,30 @@ const labelTargets = async (rules) => {
 };
 
 // The per-adult money trail for one experience, so the tables can show the real
-// effect of each mode rather than just a percentage.
+// effect of each mode rather than just a percentage. ORDER: markup → discount
+// → convenience → GST, so GST is applied on the amount that already includes
+// the convenience fee (matches the booking engine).
 const breakdownFor = (e, g) => {
   const quoted = basePriceOf(e);
   const net = taxableBase(quoted, { gstConfig: g, pricing: e.pricing });
   const afterMarkup = withMarkup(net, e.markup);
-  const gst = (afterMarkup * num(g.rate)) / 100;
+  // Discount (go-live field) then the convenience fee — both before GST.
+  const d = e.discount;
+  const discountAmt = d && d.value
+    ? (d.type === 'fixed' ? Math.min(num(d.value), afterMarkup) : (afterMarkup * num(d.value)) / 100)
+    : 0;
+  const afterDiscount = Math.max(0, afterMarkup - discountAmt);
+  const conv = convenienceAmount(afterDiscount, e.convenienceFee);
+  const beforeGst = afterDiscount + conv;
+  const gst = (beforeGst * num(g.rate)) / 100;
   return {
     quotedBase: r2(quoted),
     taxableBase: r2(net),
     afterMarkup: r2(afterMarkup),
+    convenienceAmount: r2(conv),
+    beforeGst: r2(beforeGst),
     gstAmount: r2(gst),
-    payableBeforeExtras: r2(afterMarkup + gst),
+    payableBeforeExtras: r2(beforeGst + gst),
   };
 };
 

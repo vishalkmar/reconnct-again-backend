@@ -25,7 +25,8 @@ const toR = (paise) => Number(paise || 0) / 100;
 // column is the authoritative signal — there is no separate paymentStatus.
 const isPaid = (bk) => PAID.includes(bk.status);
 
-// The final per-adult price = base B2B + markup + GST + convenience, less any %-discount.
+// The final per-adult price. ORDER: base + markup − discount → +convenience
+// → +GST (GST applies on the amount that already includes the convenience fee).
 const finalAdultPrice = (exp) => {
   const raw = Number(exp.pricing?.adultPrice) || 0;
   if (raw <= 0) return 0;
@@ -34,12 +35,12 @@ const finalAdultPrice = (exp) => {
   let d = 0;
   if (disc && disc.value) d = disc.type === 'percentage' ? (base * Number(disc.value)) / 100 : Number(disc.value) || 0;
   const net = Math.max(0, base - d);
-  const gst = (net * (Number(exp.gstRate) || 0)) / 100;
-  const afterGst = net + gst;
   const cf = exp.convenienceFee;
   let c = 0;
-  if (cf && cf.type && cf.type !== 'free') c = cf.type === 'percentage' ? (afterGst * Number(cf.value)) / 100 : Number(cf.value) || 0;
-  return Math.round(afterGst + c);
+  if (cf && cf.type && cf.type !== 'free') c = cf.type === 'percentage' ? (net * Number(cf.value)) / 100 : Number(cf.value) || 0;
+  const afterConv = net + c;
+  const gst = (afterConv * (Number(exp.gstRate) || 0)) / 100;
+  return Math.round(afterConv + gst);
 };
 
 const revenueOf = (bookings) => {

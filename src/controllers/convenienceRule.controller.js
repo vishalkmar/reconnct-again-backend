@@ -62,7 +62,8 @@ const labelTargets = async (rules) => {
 /*
   The per-adult money trail down to the fee, so every table shows the real
   effect rather than just a rule. Mirrors the order the booking engine uses:
-  base → markup → discount → GST → convenience.
+  base → markup → discount → CONVENIENCE → GST (GST on the amount that already
+  includes the fee).
 */
 const breakdownFor = (e, fee) => {
   const quoted = basePriceOf(e);
@@ -73,13 +74,14 @@ const breakdownFor = (e, fee) => {
     ? (d.type === 'fixed' ? Math.min(num(d.value), afterMarkup) : (afterMarkup * num(d.value)) / 100)
     : 0;
   const net = Math.max(0, afterMarkup - discountAmt);
-  const gst = (net * num(e.gstRate)) / 100;
-  const afterGst = net + gst;
-  const conv = convenienceAmount(afterGst, fee);
+  const conv = convenienceAmount(net, fee);
+  const afterConv = net + conv;
+  const gst = (afterConv * num(e.gstRate)) / 100;
   return {
-    afterGst: r2(afterGst),
+    // `beforeGst` = the amount GST is now applied to (net + convenience).
+    beforeGst: r2(afterConv),
     convenienceAmount: r2(conv),
-    payable: r2(afterGst + conv),
+    payable: r2(afterConv + gst),
   };
 };
 

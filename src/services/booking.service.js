@@ -324,21 +324,19 @@ const computePricing = ({
   // default only when the item predates the gstRate column (undefined).
   const itemRate = item.gstRate == null ? TAX_RATE : Number(item.gstRate) / 100;
   const tcsRate = item.tcsRate == null ? 0 : Number(item.tcsRate) / 100;
-  const gstPaise = Math.round(subtotalPaise * itemRate);
-  const tcsPaise = Math.round((subtotalPaise + gstPaise) * tcsRate);
+
+  // ORDER: markup-included subtotal → CONVENIENCE FEE → then GST on top of
+  // (subtotal + convenience) → that's the taxed total. (Convenience is charged
+  // BEFORE GST so tax applies to the fee too.) The fee is a per-BOOKING charge,
+  // and convenienceAmount() works in RUPEES so both sides convert.
+  const conveniencePaise = toPaise(convenienceAmount(fromPaise(subtotalPaise), item.convenienceFee));
+  const gstPaise = Math.round((subtotalPaise + conveniencePaise) * itemRate);
+  const tcsPaise = Math.round((subtotalPaise + conveniencePaise + gstPaise) * tcsRate);
   const taxPaise = gstPaise + tcsPaise;
 
-  // Convenience fee — the LAST thing added, on the amount that already carries
-  // GST, exactly as the go-live preview and the app's breakdown show it. It's a
-  // platform charge on the BOOKING (not per guest), so it lands once, before
-  // wallet/coupon come off.
-  // convenienceAmount() works in RUPEES — a 'fixed' fee is a rupee figure, so
-  // the conversion has to happen on both sides, not just the result.
-  const conveniencePaise = toPaise(convenienceAmount(fromPaise(subtotalPaise + taxPaise), item.convenienceFee));
-
-  // Discounts are applied after tax (matches MMT's display). Clamp so we
-  // never go below zero — defensive in case a coupon overshoots.
-  const grossPaise = subtotalPaise + taxPaise + conveniencePaise;
+  // Discounts are applied after tax. Clamp so we never go below zero —
+  // defensive in case a coupon overshoots.
+  const grossPaise = subtotalPaise + conveniencePaise + taxPaise;
   const walletDiscountPaise = Math.min(Math.max(0, Number(walletPaise || 0)), grossPaise);
   const remaining = grossPaise - walletDiscountPaise;
   const safeCoupon = Math.min(Math.max(0, Number(couponDiscountPaise || 0)), remaining);
