@@ -365,6 +365,24 @@ const start = async () => {
   // 1) Only the bare minimum before listen: a working DB connection.
   await connectDB();
 
+  // 1b) The ONE migration that cannot be deferred. Every other schema fixup
+  //     runs in the background after listen (step 3), but these columns live
+  //     on `users`, and Sequelize names every column of that model in every
+  //     login/profile/audience query. Missing them isn't a degraded feature —
+  //     it is "Unknown column 'anniversary' in 'field list'" on the OTP screen
+  //     and nobody can sign in at all. Three SHOW COLUMNS on a migrated DB, so
+  //     it costs milliseconds; non-fatal so a permissions problem here can
+  //     never keep the whole API down.
+  try {
+    const { migrate: migrateOccasionSchema } = require('./scripts/migrateOccasionSchema');
+    const result = await migrateOccasionSchema();
+    if (result.changes?.length) {
+      console.log(`[DB] Occasion schema fixups: ${result.changes.join('; ')}`);
+    }
+  } catch (err) {
+    console.error('[DB] Occasion schema migration failed:', err.message);
+  }
+
   // 2) Listen IMMEDIATELY. The previous version blocked here for several
   //    minutes while `sync({alter:true})` rewrote every table on each boot.
   //    APIs now respond in < 1s after the process starts; schema sync runs
