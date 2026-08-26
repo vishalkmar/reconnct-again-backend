@@ -26,6 +26,14 @@ const User = sequelize.define(
       allowNull: true,
     },
     dob: { type: DataTypes.DATEONLY, allowNull: true },
+    // Wedding/relationship anniversary — the second personal occasion the
+    // greeting engine watches (dob is the first). Optional, user-editable.
+    anniversary: { type: DataTypes.DATEONLY, allowNull: true },
+
+    // Set the moment a user unsubscribes from occasion greetings (festival /
+    // weekend / birthday). Null = opted in. Kept as a timestamp rather than a
+    // boolean so we can prove WHEN consent was withdrawn.
+    marketingOptOutAt: { type: DataTypes.DATE, allowNull: true },
     addressLine: { type: DataTypes.STRING(255), allowNull: true },
     // Business / company name — used by the host ("Switch to Host") profile.
     company: { type: DataTypes.STRING(180), allowNull: true },

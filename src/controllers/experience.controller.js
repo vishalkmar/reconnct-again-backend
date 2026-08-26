@@ -18,7 +18,7 @@ const { applyRuleMarkup } = require('../services/markupRule.service');
 // Columns the form is allowed to write. Everything else the client sends is
 // ignored (anything genuinely freeform should go inside `data`).
 const WRITABLE = [
-  'name', 'audiences', 'categoryIds', 'typeIds', 'supplierId', 'showSupplierPublic', 'location', 'city', 'pincode', 'nearbyLocation', 'latitude', 'longitude',
+  'name', 'audiences', 'categoryIds', 'typeIds', 'supplierId', 'showSupplierPublic', 'location', 'city', 'state', 'pincode', 'nearbyLocation', 'latitude', 'longitude',
   'rating', 'about', 'mainImage', 'gallery', 'videos', 'mode', 'status',
   'priceMethod', 'pricing', 'currency', 'gstRate', 'discount', 'convenienceFee',
   'b2cPriceMethod', 'b2cPricing', 'sourceName', 'sourceLink',

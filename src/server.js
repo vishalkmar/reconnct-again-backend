@@ -342,11 +342,16 @@ const runBackgroundDbWork = async () => {
   // exist by the time it queries them.
   const { sweepReminders, sweepCompletions } = require('./services/reminder.service');
   const { sweepQcVisitReminders } = require('./services/qcReminder.service');
+  const { sweepOccasionCampaigns } = require('./services/campaignSweep.service');
   const runSweeps = () => {
     sweepReminders().catch((err) => console.error('[reminder] sweep failed:', err.message));
     // Post-experience "how was it / please rate" email + push.
     sweepCompletions().catch((err) => console.error('[completion] sweep failed:', err.message));
     sweepQcVisitReminders().catch((err) => console.error('[qc-reminder] sweep failed:', err.message));
+    // Festival / weekend / birthday greetings (email + push + in-app bell).
+    // Self-gating: it only sends once the campaign's IST send time has passed,
+    // and campaign_dispatches' unique index makes every extra run a no-op.
+    sweepOccasionCampaigns().catch((err) => console.error('[occasion] sweep failed:', err.message));
   };
   runSweeps();
   setInterval(runSweeps, 10 * 60 * 1000);

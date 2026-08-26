@@ -18,8 +18,10 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const nominatim = async (query) => {
   if (typeof fetch !== 'function' || !query) return null;
   try {
+    // countrycodes=in biases results to India so a street/landmark resolves to
+    // the right place instead of a same-named spot abroad.
     const r = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=jsonv2&limit=1`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(query)}&format=jsonv2&limit=1&countrycodes=in&addressdetails=0`,
       { headers: { 'User-Agent': UA } },
     );
     if (!r.ok) return null;
@@ -31,16 +33,28 @@ const nominatim = async (query) => {
   } catch { return null; }
 };
 
-// The candidate query strings, most-specific first. A landmark ("Baga Beach")
-// or the pincode geocodes far more precisely than a bare city.
-const candidates = ({ location, nearbyLocation, city, pincode }) => {
-  const c = (city || '').trim();
-  const out = [];
+// The candidate query strings, MOST-SPECIFIC first, so we land on the exact
+// address before ever falling back to the city. The full combined string
+// (address, landmark, city, state, pincode, India) is tried first — that's what
+// pins "D-Mall 128 Netaji Subhash Place, Delhi" to its real spot rather than the
+// Delhi centroid.
+const candidates = ({
+  location, nearbyLocation, city, state, pincode,
+}) => {
   const clean = (s) => (s || '').trim();
-  if (clean(nearbyLocation)) out.push([clean(nearbyLocation), c].filter(Boolean).join(', '));
-  if (clean(location) && clean(location).length <= 60) out.push([clean(location), c].filter(Boolean).join(', '));
-  if (pincode && /\d{5,6}/.test(String(pincode))) out.push([String(pincode).trim(), c].filter(Boolean).join(', '));
-  if (c) out.push(c);
+  const c = clean(city);
+  const st = clean(state);
+  const pin = pincode && /\d{5,6}/.test(String(pincode)) ? String(pincode).trim() : '';
+  const out = [];
+  // 1) The whole address, most precise.
+  out.push([clean(location), clean(nearbyLocation), c, st, pin, 'India'].filter(Boolean).join(', '));
+  // 2) Landmark / street + city + state.
+  if (clean(nearbyLocation)) out.push([clean(nearbyLocation), c, st, 'India'].filter(Boolean).join(', '));
+  if (clean(location) && clean(location).length <= 80) out.push([clean(location), c, st, 'India'].filter(Boolean).join(', '));
+  // 3) Pincode (very precise on its own in India) + city.
+  if (pin) out.push([pin, c, 'India'].filter(Boolean).join(', '));
+  // 4) City + state (last resort before the centroid table).
+  if (c) out.push([c, st, 'India'].filter(Boolean).join(', '));
   return [...new Set(out.filter(Boolean))];
 };
 
@@ -81,13 +95,13 @@ const geocodeExperienceById = async (id, { force = false } = {}) => {
     // eslint-disable-next-line global-require
     const { Experience } = require('../models');
     const e = await Experience.findByPk(id, {
-      attributes: ['id', 'location', 'nearbyLocation', 'city', 'pincode', 'latitude', 'longitude'],
+      attributes: ['id', 'location', 'nearbyLocation', 'city', 'state', 'pincode', 'latitude', 'longitude'],
     });
     if (!e) return;
     if (!force && e.latitude != null && e.longitude != null) return;
     if (!e.city && !e.location && !e.nearbyLocation) return;
     const hit = await geocodeAddress({
-      location: e.location, nearbyLocation: e.nearbyLocation, city: e.city, pincode: e.pincode,
+      location: e.location, nearbyLocation: e.nearbyLocation, city: e.city, state: e.state, pincode: e.pincode,
     });
     if (hit) await Experience.update({ latitude: hit.lat, longitude: hit.lon }, { where: { id } });
   } catch (err) { console.error('[geocode] experience', id, 'failed:', err.message); }

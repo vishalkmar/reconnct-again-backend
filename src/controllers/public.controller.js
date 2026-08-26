@@ -104,6 +104,10 @@ const cardShape = async (exp) => {
     gallery: Array.isArray(j.gallery) ? j.gallery : [],
     city: j.city,
     location: j.location,
+    // Real geocoded coordinates — used to compute an accurate per-experience
+    // distance (not the city centre). Null until the address is geocoded.
+    latitude: j.latitude != null ? Number(j.latitude) : null,
+    longitude: j.longitude != null ? Number(j.longitude) : null,
     rating: Number(j.rating) || 0,
     reviewsCount: Number(j.reviewCount) || 0,
     category: j.category ? { id: j.category.id, name: j.category.name, slug: j.category.slug, colorHex: j.category.colorHex } : null,
@@ -276,8 +280,15 @@ const listExperiences = asyncHandler(async (req, res) => {
   const lon = req.query.lon != null ? Number(req.query.lon) : null;
   if (lat != null && lon != null && !Number.isNaN(lat) && !Number.isNaN(lon)) {
     cards = cards.map((c) => {
-      const co = coordsForCity(c.city) || coordsForCity(c.location);
-      c.distanceKm = co ? haversineKm(lat, lon, co[0], co[1]) : null;
+      // Use the experience's OWN geocoded coordinates for a real distance.
+      // Only when it hasn't been geocoded yet do we fall back to the city
+      // centre — that's why same-city listings used to all show one distance.
+      if (c.latitude != null && c.longitude != null) {
+        c.distanceKm = Math.round(haversineKm(lat, lon, c.latitude, c.longitude) * 10) / 10;
+      } else {
+        const co = coordsForCity(c.city) || coordsForCity(c.location);
+        c.distanceKm = co ? Math.round(haversineKm(lat, lon, co[0], co[1]) * 10) / 10 : null;
+      }
       return c;
     });
     cards.sort((a, b) => {

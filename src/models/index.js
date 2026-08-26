@@ -62,6 +62,8 @@ const GstRule = require('./gstRule.model');
 const ConvenienceRule = require('./convenienceRule.model');
 const FraudEvent = require('./fraudEvent.model');
 const FraudBlockedEmail = require('./fraudBlockedEmail.model');
+const CampaignEvent = require('./campaignEvent.model');
+const CampaignDispatch = require('./campaignDispatch.model');
 
 const db = {
   sequelize,
@@ -128,6 +130,8 @@ const db = {
   ConvenienceRule,
   FraudEvent,
   FraudBlockedEmail,
+  CampaignEvent,
+  CampaignDispatch,
 };
 
 // ─── Users: self-reference for referrals ──────────────────────────────────
@@ -494,6 +498,13 @@ SupportConversation.hasMany(SupportMessage, { foreignKey: 'conversationId', as: 
 SupportMessage.belongsTo(SupportConversation, { foreignKey: 'conversationId', as: 'conversation' });
 SupportConversation.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 SupportConversation.belongsTo(Supplier, { foreignKey: 'supplierId', as: 'supplier' });
+
+// ─── Occasion marketing (festival / weekend / birthday greetings) ────────
+// A dispatch belongs to its campaign and to the user it greeted. Deleting a
+// campaign takes its send log with it (the log is only meaningful in context).
+CampaignEvent.hasMany(CampaignDispatch, { foreignKey: 'campaignEventId', as: 'dispatches', onDelete: 'CASCADE' });
+CampaignDispatch.belongsTo(CampaignEvent, { foreignKey: 'campaignEventId', as: 'campaign' });
+CampaignDispatch.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 // PWA models register themselves with sequelize on require. We pull them in
 // here so a single `require('./models')` from app/server boots both worlds.

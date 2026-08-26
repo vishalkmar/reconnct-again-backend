@@ -86,6 +86,12 @@ router.use('/admin/b2b', require('./b2bManagement.routes'));
 // Pricing Setup Management (admin) — global markup / discount / GST / convenience.
 router.use('/admin/pricing-setup', require('./pricingSetup.routes'));
 
+// Occasion Marketing (admin) — festival / weekend / birthday greetings over
+// email + app push + the in-app bell. See campaignSweep.service.js.
+router.use('/admin/campaigns', require('./campaign.routes'));
+// Public opt-out surface for those greetings (clicked from an email footer).
+router.use('/campaigns', require('./publicCampaign.routes'));
+
 // Security (admin) — payment fraud detection + account freeze management.
 router.use('/admin/security', require('./security.routes'));
 

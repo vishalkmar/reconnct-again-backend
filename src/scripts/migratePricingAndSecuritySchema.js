@@ -58,6 +58,10 @@ const migrate = async () => {
   // The user's real IP/device captured at booking time (fraud attribution).
   await addColumnIfMissing('bookings', 'clientContext', 'JSON NULL', changes);
 
+  // ── Address / geocoding ────────────────────────────────────────────────
+  // State completes the address so it geocodes to an exact point (not city centre).
+  await addColumnIfMissing('experiences', 'state', 'VARCHAR(120) NULL', changes);
+
   // ── Admin two-factor / MFA ─────────────────────────────────────────────
   await addColumnIfMissing('admins', 'twoFactorEmailEnabled', 'TINYINT(1) NOT NULL DEFAULT 0', changes);
   await addColumnIfMissing('admins', 'twoFactorEmail', 'VARCHAR(180) NULL', changes);

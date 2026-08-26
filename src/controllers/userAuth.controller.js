@@ -41,6 +41,9 @@ const publicUser = (user) => {
     avatarUrl: json.avatarUrl,
     gender: json.gender,
     dob: json.dob,
+    anniversary: json.anniversary,
+    // Null = still opted in to festival / weekend / birthday greetings.
+    marketingOptOutAt: json.marketingOptOutAt || null,
     addressLine: json.addressLine,
     company: json.company,
     city: json.city,
@@ -258,7 +261,7 @@ const me = asyncHandler(async (req, res) => {
 // profile fields. The bare essentials (email) are immutable here.
 const updateProfile = asyncHandler(async (req, res) => {
   const user = req.user;
-  const allowed = ['name', 'phone', 'avatarUrl', 'gender', 'dob', 'addressLine', 'company', 'city', 'state', 'country', 'pincode'];
+  const allowed = ['name', 'phone', 'avatarUrl', 'gender', 'dob', 'anniversary', 'addressLine', 'company', 'city', 'state', 'country', 'pincode'];
 
   for (const key of allowed) {
     if (key in req.body) {

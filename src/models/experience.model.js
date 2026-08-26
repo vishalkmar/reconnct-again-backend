@@ -81,6 +81,9 @@ const Experience = sequelize.define(
     // ── Core details (Task 4) ────────────────────────────────────────────
     location: { type: DataTypes.STRING(255), allowNull: true },
     city: { type: DataTypes.STRING(160), allowNull: true },
+    // State — collected alongside city + pincode so the full address geocodes to
+    // an EXACT point (not the city centre). Chosen from a fixed list on the forms.
+    state: { type: DataTypes.STRING(120), allowNull: true },
     // Split out from the free-text address (all upload forms collect it
     // separately now) — a pincode geocodes far more precisely than a city name.
     pincode: { type: DataTypes.STRING(12), allowNull: true },

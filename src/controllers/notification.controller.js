@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const { Op } = require('sequelize');
 const {
   Booking, WalletTransaction, User, Experience, Supplier, ReviewNotification,
+  CampaignDispatch,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 
@@ -156,6 +157,34 @@ const list = asyncHandler(async (req, res) => {
       experienceId: j.experienceId || null,
     });
   });
+
+  // Occasion greetings (festival / weekend / birthday). Unlike everything else
+  // in this feed these are NOT derived: campaignSweep.service.js already wrote
+  // one row per greeting it delivered, with the copy snapshotted — so the bell
+  // shows exactly what was sent even if the admin later edits the campaign.
+  const greetings = await CampaignDispatch.findAll({
+    // mergedIntoCampaignId rows are the tag-along half of a merged greeting —
+    // the message was already delivered under the lead occasion's row, so
+    // showing them too would repeat the same wish in the bell.
+    where: {
+      userId, channel: 'inapp', status: 'sent', mergedIntoCampaignId: null,
+    },
+    order: [['sentAt', 'DESC']],
+    limit: 30,
+  });
+  for (const g of greetings) {
+    const j = g.toJSON();
+    feed.push({
+      id: `c${j.id}`,
+      kind: 'campaign',
+      title: j.title,
+      body: j.body || '',
+      image: j.imageUrl || null,
+      ctaPath: j.ctaPath || '/experiences',
+      at: j.sentAt || j.createdAt,
+      readAt: j.readAt || null,
+    });
+  }
 
   feed.sort((a, b) => String(b.at || '').localeCompare(String(a.at || '')));
 
