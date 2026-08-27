@@ -689,11 +689,30 @@ const analytics = asyncHandler(async (req, res) => {
     if (!trackedFrom || new Date(r.sentAt) < new Date(trackedFrom)) trackedFrom = r.sentAt;
   }
 
+  /*
+    Test sends, counted SEPARATELY and always — even when this request excluded
+    them from everything else.
+
+    Without this the page could tell an outright lie. `rows` has already had
+    test sends filtered out, so an admin who pressed Test, opened the mail and
+    clicked it saw "nothing has been measured yet" — while their test had in
+    fact been measured perfectly and was sitting one panel below. The most
+    likely reason someone is looking at this screen is that they just tested,
+    so that is precisely the case the page has to get right.
+  */
+  const testWhere = { occurrenceDate: { [Op.gte]: since }, isTest: true };
+  const [testSent, testOpened, testClicked] = await Promise.all([
+    CampaignDispatch.count({ where: testWhere }),
+    CampaignDispatch.count({ where: { ...testWhere, openedAt: { [Op.ne]: null } } }),
+    CampaignDispatch.count({ where: { ...testWhere, clickedAt: { [Op.ne]: null } } }),
+  ]);
+
   return ok(res, {
     days,
     since,
     attributionDays: ATTRIBUTION_DAYS,
     includeTests,
+    tests: { sent: testSent, opened: testOpened, clicked: testClicked },
     tracking: {
       // Without APP_URL there is no absolute URL to point a pixel at, so
       // campaignEmail.service emits none and every send is unmeasured.
