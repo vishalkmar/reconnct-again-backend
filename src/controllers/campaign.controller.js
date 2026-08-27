@@ -1,7 +1,7 @@
 const asyncHandler = require('express-async-handler');
-const { Op, fn, col, literal } = require('sequelize');
+const { Op, fn, col } = require('sequelize');
 const {
-  CampaignEvent, CampaignDispatch, User,
+  CampaignEvent, CampaignDispatch, User, Booking,
 } = require('../models');
 const { ok, created, fail } = require('../utils/response');
 const { istDateKey, prettyKey, addDaysToKey } = require('../utils/istDate');
@@ -16,6 +16,7 @@ const {
 } = require('../services/campaignCountdown.service');
 const { seedCampaignCalendar } = require('../seeders/seedCampaignCalendar');
 const { makeToken, readToken } = require('../utils/unsubscribeToken');
+const { readTrackToken } = require('../utils/campaignTrackToken');
 
 /*
   Admin → Occasion Marketing. CRUD over the greeting calendar plus the three
@@ -392,88 +393,341 @@ const seed = asyncHandler(async (req, res) => {
 });
 
 /*
-  GET /api/admin/campaigns/analytics?days=90
-  Reach and delivery, split by channel — the honest version: an email counted
-  here is one we handed to the SMTP server, not one that was opened.
+  GET /api/admin/campaigns/analytics?days=90&type=&campaignId=&channel=&offsetDay=
+
+  What a wave actually did, as a funnel rather than a send count:
+
+      sent → opened → clicked → explored an experience → booked
+
+  Every step is measured and the honesty of each one differs, so the payload
+  says which is which rather than letting the dashboard present them as peers:
+
+    - sent      HARD. One dispatch row per person per channel.
+    - opened    SOFT, email only. A tracking pixel — Gmail proxies images and
+                Apple Mail Privacy Protection pre-fetches them, so this
+                over-counts, sometimes badly. A trend, not a number.
+    - clicked   HARD. Somebody tapped a link and reached the chooser.
+    - explored  HARD, and the one that matters: they tapped a suggested
+                EXPERIENCE, not the generic browse button.
+    - booked    ATTRIBUTED, not proven. See below.
+
+  ── The revenue number, and what it is not ────────────────────────────────
+
+  A booking carries no campaign id — people click a greeting on Tuesday and
+  book on Thursday from the home page. So revenue is attributed by WINDOW: a
+  confirmed booking counts for a campaign when that same user clicked that
+  campaign's link within ATTRIBUTION_DAYS before booking.
+
+  That is last-touch attribution, and it is a claim rather than a fact: the
+  customer might well have booked anyway. It is labelled "influenced"
+  everywhere it is shown, for exactly that reason. What it is genuinely good
+  for is COMPARISON — Diwali against Holi, the "-3" beat against the day-of
+  one — because the same bias applies to every row equally.
 */
+const ATTRIBUTION_DAYS = 7;
+
 const analytics = asyncHandler(async (req, res) => {
   const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 730);
   const since = addDaysToKey(istDateKey(), -days);
 
-  const [byChannel, byCampaign, audience, recent] = await Promise.all([
-    CampaignDispatch.findAll({
-      attributes: ['channel', 'status', [fn('COUNT', col('id')), 'n']],
-      where: { occurrenceDate: { [Op.gte]: since } },
-      group: ['channel', 'status'],
-      raw: true,
-    }),
-    CampaignDispatch.findAll({
-      attributes: [
-        'campaignEventId',
-        [fn('COUNT', col('CampaignDispatch.id')), 'n'],
-        [fn('COUNT', fn('DISTINCT', col('userId'))), 'people'],
-      ],
-      where: { occurrenceDate: { [Op.gte]: since } },
-      include: [{ model: CampaignEvent, as: 'campaign', attributes: ['name', 'slug', 'type'] }],
-      group: ['campaignEventId', 'campaign.id'],
-      order: [[literal('n'), 'DESC']],
-      limit: 20,
-    }),
-    Promise.all([
-      User.count({ where: { isActive: true } }),
-      User.count({ where: { isActive: true, marketingOptOutAt: null } }),
-      User.count({ where: { isActive: true, dob: { [Op.ne]: null } } }),
-      User.count({ where: { isActive: true, anniversary: { [Op.ne]: null } } }),
-      User.count({ where: { isActive: true, fcmToken: { [Op.ne]: null } } }),
-    ]),
-    CampaignDispatch.findAll({
-      where: { occurrenceDate: { [Op.gte]: since } },
-      include: [{ model: CampaignEvent, as: 'campaign', attributes: ['name', 'slug'] }],
-      order: [['sentAt', 'DESC']],
-      limit: 25,
-    }),
-  ]);
-
-  const channels = {};
-  for (const r of byChannel) {
-    channels[r.channel] = channels[r.channel] || { sent: 0, failed: 0 };
-    channels[r.channel][r.status === 'failed' ? 'failed' : 'sent'] += Number(r.n);
+  /*
+    Filters, all optional, all applied to the SAME base query — so every card,
+    chart and table on the page describes one identical slice. A dashboard
+    whose headline number disagrees with its own table is worse than a
+    dashboard with fewer numbers on it.
+  */
+  const where = { occurrenceDate: { [Op.gte]: since } };
+  if (Number(req.query.campaignId)) where.campaignEventId = Number(req.query.campaignId);
+  if (['email', 'push', 'inapp'].includes(req.query.channel)) where.channel = req.query.channel;
+  if (req.query.offsetDay !== undefined && req.query.offsetDay !== '') {
+    const o = Number(req.query.offsetDay);
+    if (Number.isInteger(o)) where.offsetDay = o;
   }
 
-  const [total, optedIn, withDob, withAnniversary, withPush] = audience;
+  const typeFilter = String(req.query.type || '');
+  const campaignInclude = {
+    model: CampaignEvent,
+    as: 'campaign',
+    attributes: ['id', 'name', 'slug', 'type'],
+    required: !!typeFilter,
+    where: typeFilter ? { type: typeFilter } : undefined,
+  };
+
+  // One pass over the dispatch rows is all the funnel needs; pulling them once
+  // and folding in JS beats six GROUP BY round-trips to a remote database.
+  const rows = await CampaignDispatch.findAll({
+    where,
+    include: [campaignInclude],
+    attributes: [
+      'id', 'campaignEventId', 'channel', 'status', 'offsetDay', 'occurrenceDate',
+      'userId', 'sentAt', 'openedAt', 'clickedAt', 'clickCount', 'clickKind', 'clickVia',
+    ],
+    order: [['sentAt', 'DESC']],
+    limit: 20000,
+  });
+
+  const blank = () => ({
+    sent: 0,
+    failed: 0,
+    opened: 0,
+    clicked: 0,
+    explored: 0,
+    clicks: 0,
+    viaApp: 0,
+    viaBrowser: 0,
+    people: new Set(),
+  });
+
+  const fold = (acc, r) => {
+    if (r.status === 'failed') { acc.failed += 1; return acc; }
+    acc.sent += 1;
+    acc.people.add(r.userId);
+    if (r.openedAt) acc.opened += 1;
+    if (r.clickedAt) {
+      acc.clicked += 1;
+      acc.clicks += r.clickCount || 1;
+      if (r.clickKind === 'experience') acc.explored += 1;
+      if (r.clickVia === 'app') acc.viaApp += 1; else acc.viaBrowser += 1;
+    }
+    return acc;
+  };
+
+  // Sets are how "people" stays a headcount rather than a message count; they
+  // are collapsed to a size on the way out.
+  const finish = (a) => {
+    const { people, ...rest } = a;
+    return { ...rest, people: people.size };
+  };
+
+  const overall = blank();
+  const byChannel = new Map();
+  const byCampaign = new Map();
+  const byBeat = new Map();
+  const byDate = new Map();
+  const clickedUsers = new Map(); // userId -> { at, campaignEventId } — for attribution
+
+  for (const row of rows) {
+    const r = row.toJSON();
+    fold(overall, r);
+
+    if (!byChannel.has(r.channel)) byChannel.set(r.channel, blank());
+    fold(byChannel.get(r.channel), r);
+
+    if (!byCampaign.has(r.campaignEventId)) {
+      byCampaign.set(r.campaignEventId, {
+        ...blank(),
+        id: r.campaignEventId,
+        name: (r.campaign && r.campaign.name) || '(deleted)',
+        slug: (r.campaign && r.campaign.slug) || null,
+        type: (r.campaign && r.campaign.type) || null,
+      });
+    }
+    fold(byCampaign.get(r.campaignEventId), r);
+
+    if (!byBeat.has(r.offsetDay)) byBeat.set(r.offsetDay, { ...blank(), offsetDay: r.offsetDay });
+    fold(byBeat.get(r.offsetDay), r);
+
+    if (!byDate.has(r.occurrenceDate)) byDate.set(r.occurrenceDate, { ...blank(), date: r.occurrenceDate });
+    fold(byDate.get(r.occurrenceDate), r);
+
+    // Earliest click wins the attribution — the message that first moved them.
+    if (r.clickedAt) {
+      const prev = clickedUsers.get(r.userId);
+      if (!prev || new Date(r.clickedAt) < new Date(prev.at)) {
+        clickedUsers.set(r.userId, { at: r.clickedAt, campaignEventId: r.campaignEventId });
+      }
+    }
+  }
+
+  /*
+    Attributed revenue. ONE query for the bookings of everyone who clicked in
+    this window, then matched back in JS — a per-campaign SQL join would be a
+    correlated subquery per campaign against a remote database, for a number
+    that is an estimate either way.
+  */
+  const attributed = { bookings: 0, revenuePaise: 0, byCampaign: new Map() };
+  if (clickedUsers.size) {
+    const userIds = [...clickedUsers.keys()];
+    const earliestClick = [...clickedUsers.values()]
+      .reduce((min, v) => (!min || new Date(v.at) < new Date(min) ? v.at : min), null);
+
+    const bookings = await Booking.findAll({
+      where: {
+        userId: { [Op.in]: userIds },
+        status: { [Op.in]: ['confirmed', 'completed'] },
+        createdAt: { [Op.gte]: new Date(earliestClick) },
+      },
+      attributes: ['id', 'userId', 'totalPaise', 'createdAt'],
+      limit: 5000,
+    });
+
+    const windowMs = ATTRIBUTION_DAYS * 24 * 60 * 60 * 1000;
+    for (const b of bookings) {
+      const click = clickedUsers.get(b.userId);
+      if (!click) continue;
+      const gap = new Date(b.createdAt) - new Date(click.at);
+      if (gap < 0 || gap > windowMs) continue;
+      attributed.bookings += 1;
+      attributed.revenuePaise += b.totalPaise || 0;
+      const c = attributed.byCampaign.get(click.campaignEventId) || { bookings: 0, revenuePaise: 0 };
+      c.bookings += 1;
+      c.revenuePaise += b.totalPaise || 0;
+      attributed.byCampaign.set(click.campaignEventId, c);
+    }
+  }
+
+  // Audience health — who the engine can even reach, and on which channel.
+  const [total, optedIn, withDob, withAnniversary, withPush] = await Promise.all([
+    User.count({ where: { isActive: true } }),
+    User.count({ where: { isActive: true, marketingOptOutAt: null } }),
+    User.count({ where: { isActive: true, dob: { [Op.ne]: null } } }),
+    User.count({ where: { isActive: true, anniversary: { [Op.ne]: null } } }),
+    User.count({ where: { isActive: true, fcmToken: { [Op.ne]: null } } }),
+  ]);
+
+  const campaignRows = [...byCampaign.values()]
+    .map((c) => ({
+      ...finish(c),
+      ...(attributed.byCampaign.get(c.id) || { bookings: 0, revenuePaise: 0 }),
+    }))
+    .sort((a, b) => b.sent - a.sent);
+
+  const channels = {};
+  for (const [name, acc] of byChannel) channels[name] = finish(acc);
 
   return ok(res, {
     days,
     since,
+    attributionDays: ATTRIBUTION_DAYS,
+    filters: {
+      type: typeFilter,
+      campaignId: Number(req.query.campaignId) || null,
+      channel: req.query.channel || '',
+      offsetDay: req.query.offsetDay === undefined || req.query.offsetDay === ''
+        ? null
+        : Number(req.query.offsetDay),
+    },
+    funnel: {
+      ...finish(overall),
+      bookings: attributed.bookings,
+      revenuePaise: attributed.revenuePaise,
+    },
     channels,
-    campaigns: byCampaign.map((r) => {
-      const j = r.toJSON();
-      return {
-        campaignEventId: j.campaignEventId,
-        name: j.campaign?.name || '(deleted)',
-        slug: j.campaign?.slug || null,
-        type: j.campaign?.type || null,
-        messages: Number(j.n),
-        people: Number(j.people),
-      };
-    }),
+    campaigns: campaignRows,
+    beats: [...byBeat.values()].map(finish).sort((a, b) => a.offsetDay - b.offsetDay),
+    timeline: [...byDate.values()].map(finish).sort((a, b) => (a.date < b.date ? -1 : 1)),
     audience: {
       total, optedIn, optedOut: total - optedIn, withDob, withAnniversary, withPush,
     },
-    recent: recent.map((r) => {
-      const j = r.toJSON();
+    recent: rows.slice(0, 25).map((row) => {
+      const j = row.toJSON();
       return {
         id: j.id,
-        campaign: j.campaign?.name || '(deleted)',
+        campaign: (j.campaign && j.campaign.name) || '(deleted)',
         channel: j.channel,
         status: j.status,
-        error: j.error,
-        occurrenceDate: j.occurrenceDate,
         offsetDay: j.offsetDay,
+        occurrenceDate: j.occurrenceDate,
         sentAt: j.sentAt,
+        openedAt: j.openedAt,
+        clickedAt: j.clickedAt,
+        clickKind: j.clickKind,
+        clickVia: j.clickVia,
       };
     }),
   });
+});
+
+/*
+  ── Engagement tracking (public, no auth, never fails loudly) ──────────────
+
+  Two endpoints, both reached from a greeting email or the app-or-browser
+  chooser, and both answering with a 1x1 GIF whatever happens. A tracking
+  endpoint that can return an error is a broken image in somebody's inbox, so
+  every failure path here — bad token, deleted dispatch, dead database — ends
+  the same way: a transparent pixel and a 200.
+
+  Nothing here trusts its input. The token is an HMAC over the dispatch id
+  (utils/campaignTrackToken.js), so these URLs cannot be walked to inflate the
+  numbers, and an unrecognised one is simply ignored.
+*/
+const PIXEL = Buffer.from(
+  'R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7',
+  'base64'
+);
+
+const sendPixel = (res) => {
+  res.set({
+    'Content-Type': 'image/gif',
+    'Content-Length': String(PIXEL.length),
+    // Proxies caching the pixel would silently stop counting opens.
+    'Cache-Control': 'no-store, no-cache, must-revalidate, private',
+    Pragma: 'no-cache',
+    Expires: '0',
+  });
+  return res.status(200).end(PIXEL);
+};
+
+/*
+  GET /api/campaigns/t/open.gif?t=<token>
+
+  The email open pixel. Soft by design and labelled as such everywhere it is
+  shown: Gmail proxies images and Apple Mail Privacy Protection pre-fetches
+  them, so this over-counts. It is here because the SHAPE of the curve is
+  still useful, not because the number is exact.
+
+  Only the FIRST open is recorded. A second one is the same person scrolling
+  past the mail again, and counting it would make "opens" drift away from
+  "people".
+*/
+const trackOpen = asyncHandler(async (req, res) => {
+  const id = readTrackToken(req.query.t);
+  if (id) {
+    try {
+      await CampaignDispatch.update(
+        { openedAt: new Date() },
+        { where: { id, openedAt: null } }
+      );
+    } catch (err) {
+      console.warn('[occasion] open tracking failed:', err.message);
+    }
+  }
+  return sendPixel(res);
+});
+
+/*
+  GET /api/campaigns/t/click.gif?t=<token>&k=experience|browse&via=app|browser
+
+  Fired by the chooser page (frontend/public/open.html) — as an IMAGE, not a
+  fetch, deliberately: the site and the API are on different origins, and an
+  image request needs no CORS preflight, no credentials and no error handling
+  on a page whose only job is to get out of the way.
+
+  `clickedAt` keeps the FIRST click (when the campaign worked) while
+  clickCount keeps every one. `clickKind` is only ever upgraded to
+  'experience': someone who browsed and then opened an experience did explore
+  one, and the reverse order should not downgrade them back to a browser.
+*/
+const trackClick = asyncHandler(async (req, res) => {
+  const id = readTrackToken(req.query.t);
+  if (id) {
+    try {
+      const row = await CampaignDispatch.findByPk(id);
+      if (row) {
+        const kind = req.query.k === 'experience' ? 'experience' : 'browse';
+        const via = req.query.via === 'app' ? 'app' : 'browser';
+        await row.update({
+          clickedAt: row.clickedAt || new Date(),
+          clickCount: (row.clickCount || 0) + 1,
+          clickKind: row.clickKind === 'experience' ? 'experience' : kind,
+          clickVia: via,
+        });
+      }
+    } catch (err) {
+      console.warn('[occasion] click tracking failed:', err.message);
+    }
+  }
+  return sendPixel(res);
 });
 
 /*
@@ -511,4 +765,6 @@ module.exports = {
   analytics,
   unsubscribe,
   resubscribe,
+  trackOpen,
+  trackClick,
 };

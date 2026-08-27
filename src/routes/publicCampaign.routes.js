@@ -11,6 +11,14 @@ const ctrl = require('../controllers/campaign.controller');
   The HMAC token in the link is the authorisation (utils/unsubscribeToken.js),
   and it can only ever do this one thing.
 */
+/*
+  Engagement pixels, also unauthenticated — they are loaded by a mail client
+  and by a static page, neither of which has a session. Both always answer
+  with a 1x1 GIF, so a bad token is a no-op rather than a broken image.
+*/
+router.get('/t/open.gif', ctrl.trackOpen);
+router.get('/t/click.gif', ctrl.trackClick);
+
 router.get('/unsubscribe', ctrl.unsubscribe);
 router.post('/unsubscribe', ctrl.unsubscribe);
 

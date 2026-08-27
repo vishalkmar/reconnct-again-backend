@@ -54,6 +54,20 @@ const migrate = async () => {
   // occasion merging existed; a fresh install gets it from sync().
   await addColumnIfMissing('campaign_dispatches', 'mergedIntoCampaignId', 'INT NULL', summary);
 
+  /*
+    Engagement tracking — the open/click funnel behind the analytics tab.
+    Same reason as every column above: sync() without { alter } creates
+    tables, never columns, so the moment the model listed these every
+    SELECT on campaign_dispatches would fail with "Unknown column" — which
+    on this table means the in-app notification bell goes down, not just a
+    report.
+  */
+  await addColumnIfMissing('campaign_dispatches', 'openedAt', 'DATETIME NULL', summary);
+  await addColumnIfMissing('campaign_dispatches', 'clickedAt', 'DATETIME NULL', summary);
+  await addColumnIfMissing('campaign_dispatches', 'clickCount', 'INT NOT NULL DEFAULT 0', summary);
+  await addColumnIfMissing('campaign_dispatches', 'clickKind', 'VARCHAR(12) NULL', summary);
+  await addColumnIfMissing('campaign_dispatches', 'clickVia', 'VARCHAR(10) NULL', summary);
+
   return summary;
 };
 

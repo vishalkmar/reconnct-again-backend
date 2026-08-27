@@ -13,6 +13,7 @@ const { stageBadge, dayOfSell, tomorrowTeaser } = require('./campaignCountdown.s
 const { sendOccasionGreeting } = require('./campaignEmail.service');
 const { sendPushToUser } = require('./push.service');
 const { makeToken } = require('../utils/unsubscribeToken');
+const { makeTrackToken } = require('../utils/campaignTrackToken');
 
 /*
   The dispatcher. Runs on the same periodic sweep as the booking reminders
@@ -264,6 +265,10 @@ const sendMerged = async ({
         alsoToday: extras,
         offsetDay: lead.offsetDay,
         occurrenceDate: lead.occurrenceDate,
+        // The dispatch row is claimed BEFORE the send, so its id already
+        // exists here — which is what lets every link in this one mail be
+        // attributed to this one person without a second write.
+        trackToken: makeTrackToken(row.id),
         unsubToken: makeToken(user.id),
       });
     } else if (channel === 'push') {

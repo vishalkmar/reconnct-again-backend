@@ -1,5 +1,5 @@
 const { getMessaging } = require('firebase-admin/messaging');
-const { getApp, isConfigured } = require('../config/firebaseAdmin');
+const { getApp, isConfigured, configError } = require('../config/firebaseAdmin');
 const { User, Supplier } = require('../models');
 
 /*
@@ -74,7 +74,7 @@ const sendPushToUser = async (userId, { title, body, data } = {}) => {
   if (!userId) return { ok: false, reason: 'no user id' };
   if (!isConfigured()) {
     console.warn('[push] skipped (user %s): FCM not configured', userId);
-    return { ok: false, reason: 'FCM not configured on this server (FIREBASE_SERVICE_ACCOUNT is unset)' };
+    return { ok: false, reason: configError() };
   }
   try {
     const user = await User.findByPk(userId);
@@ -85,7 +85,7 @@ const sendPushToUser = async (userId, { title, body, data } = {}) => {
     }
 
     const app = getApp();
-    if (!app) return { ok: false, reason: 'FCM credentials are invalid' };
+    if (!app) return { ok: false, reason: configError() || 'Firebase credentials are invalid' };
 
     const id = await getMessaging(app).send({
       token: user.fcmToken,

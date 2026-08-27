@@ -17,6 +17,19 @@ const { prettyKey } = require('../utils/istDate');
 const clientUrl = () => String(process.env.CLIENT_URL || '').replace(/\/$/, '');
 
 /*
+  This server's own public base, for the tracking pixels. Same env var the
+  payment callbacks use, so there is one answer to "where does this backend
+  live" rather than two that can disagree. Empty (unset) simply means no
+  tracking markup is emitted — the mail still sends, it just is not measured.
+*/
+const apiUrl = () => String(process.env.APP_URL || '').replace(/\/$/, '');
+
+const trackUrl = (kind, token, extra = '') =>
+  (apiUrl() && token
+    ? `${apiUrl()}/api/campaigns/t/${kind}.gif?t=${encodeURIComponent(token)}${extra}`
+    : '');
+
+/*
   Every destination link in a greeting goes through /open.html — the
   app-or-browser chooser (frontend/public/open.html) — rather than straight to
   the page.
@@ -36,18 +49,34 @@ const clientUrl = () => String(process.env.CLIENT_URL || '').replace(/\/$/, '');
   front of someone trying to leave is exactly the behaviour that gets a
   sending domain reported, so that one stays direct.
 */
-const linkTo = (path, campaignSlug) => {
+const linkTo = (path, campaignSlug, { trackToken = null, kind = 'browse' } = {}) => {
   const base = clientUrl();
   const clean = String(path || '/experiences');
   const sep = clean.includes('?') ? '&' : '?';
   // utm tags so the admin can tell campaign traffic apart in analytics.
   const dest = `${clean}${sep}utm_source=email&utm_medium=occasion&utm_campaign=${encodeURIComponent(campaignSlug)}`;
-  return `${base}/open.html?to=${encodeURIComponent(dest)}`;
+
+  /*
+    The chooser is a STATIC file and cannot know where the API lives, so the
+    click pixel arrives fully-formed in `trk`. It also means the two never
+    drift: change APP_URL and every future link follows, with nothing to
+    redeploy on the frontend.
+
+    `kind` is what separates the metric that matters from the one that does
+    not — 'experience' is somebody who tapped a suggested experience, 'browse'
+    is the generic CTA at the bottom.
+  */
+  const trk = trackUrl('click', trackToken, `&k=${kind}`);
+  const parts = [`to=${encodeURIComponent(dest)}`];
+  if (trk) parts.push(`trk=${encodeURIComponent(trk)}`);
+  return `${base}/open.html?${parts.join('&')}`;
 };
 
 // One experience card — image, name, city. Table-based so Outlook behaves.
-const experienceCard = (exp, campaignSlug) => {
-  const href = linkTo(`/experiences/${exp.slug || exp.id}`, campaignSlug);
+const experienceCard = (exp, campaignSlug, trackToken) => {
+  const href = linkTo(`/experiences/${exp.slug || exp.id}`, campaignSlug, {
+    trackToken, kind: 'experience',
+  });
   const img = exp.mainImage
     ? `<img src="${esc(exp.mainImage)}" width="110" alt="" style="display:block;width:110px;height:80px;object-fit:cover;border-radius:10px;" />`
     : `<div style="width:110px;height:80px;border-radius:10px;background:#fff3d6;"></div>`;
@@ -78,13 +107,16 @@ const experienceCard = (exp, campaignSlug) => {
  *                    its own wish and suggestions — see "Also today" below
  * @param offsetDay   which beat of the run-up this is (-7 … 0)
  * @param occurrenceDate  the occasion's own date, for the countdown ribbon
+ * @param trackToken  signed handle for THIS dispatch row — drives the open
+ *                    pixel and the per-link click tracking. Omit it (a test
+ *                    send) and the mail simply goes out unmeasured.
  * @param unsubToken  opaque token for the one-click opt-out link
  */
 const sendOccasionGreeting = ({
   to, name, campaign, title, message, experiences = [], alsoToday = [],
-  offsetDay = 0, occurrenceDate = null, unsubToken,
+  offsetDay = 0, occurrenceDate = null, trackToken = null, unsubToken,
 }) => {
-  const cta = linkTo(campaign.ctaPath || '/experiences', campaign.slug);
+  const cta = linkTo(campaign.ctaPath || '/experiences', campaign.slug, { trackToken, kind: 'browse' });
   const banner = campaign.imageUrl
     ? `<img src="${esc(campaign.imageUrl)}" alt="${esc(campaign.name)}" style="display:block;width:100%;max-width:544px;border-radius:12px;margin:0 0 18px;" />`
     : '';
@@ -169,7 +201,7 @@ const sendOccasionGreeting = ({
          <div style="font-size:13px;font-weight:700;color:#101828;margin:0 0 10px;">
            ${isDayOf ? 'Still bookable today' : 'Handpicked for the occasion'}
          </div>
-         ${experiences.slice(0, 3).map((e) => experienceCard(e, campaign.slug)).join('')}
+         ${experiences.slice(0, 3).map((e) => experienceCard(e, campaign.slug, trackToken)).join('')}
        </div>`
     : '';
 
@@ -186,11 +218,23 @@ const sendOccasionGreeting = ({
              <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#94a3b8;margin:0 0 4px;">${esc(extra.offsetDay ? `Coming up · ${extra.stage || ''}` : 'Also today')}</div>
              <div style="font-weight:700;color:#101828;font-size:16px;margin:0 0 6px;">${esc(extra.title || extra.name)}</div>
              ${extra.message ? `<p style="color:#374151;line-height:1.6;margin:0 0 10px;white-space:pre-line;">${esc(extra.message)}</p>` : ''}
-             ${(extra.experiences || []).slice(0, 2).map((e) => experienceCard(e, campaign.slug)).join('')}
+             ${(extra.experiences || []).slice(0, 2).map((e) => experienceCard(e, campaign.slug, trackToken)).join('')}
            </div>
          `).join('')}
        </div>`
     : '';
+  /*
+    The open pixel. Last element in the body and 1x1, so a client that blocks
+    images shows nothing rather than a broken-image icon. Deliberately the
+    softest number in the dashboard — Gmail proxies images and Apple Mail
+    pre-fetches them, so this over-counts and is labelled that way wherever
+    it is displayed.
+  */
+  const openBeacon = trackUrl('open', trackToken);
+  const openPixel = openBeacon
+    ? `<img src="${esc(openBeacon)}" width="1" height="1" alt="" style="display:block;width:1px;height:1px;border:0;" />`
+    : '';
+
   const unsub = unsubToken
     ? `<div style="margin-top:14px;color:#a1a8b3;font-size:11px;">
          Don't want festival &amp; weekend greetings?
@@ -220,6 +264,7 @@ const sendOccasionGreeting = ({
       ${also}
       ${ctaButton(cta, campaign.ctaLabel || 'Explore experiences')}
       ${unsub}
+      ${openPixel}
     `,
     footerNote: 'You are receiving this because you have a reconnct account.',
   });

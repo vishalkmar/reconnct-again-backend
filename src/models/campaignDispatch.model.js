@@ -48,6 +48,31 @@ const CampaignDispatch = sequelize.define(
 
     readAt: { type: DataTypes.DATE, allowNull: true },
     sentAt: { type: DataTypes.DATE, allowNull: true },
+
+    /*
+      ── Engagement, so "did this wave do anything?" has an answer ──────────
+
+      Handing a mail to the SMTP server is not the same as anybody reading it.
+      These four columns are the funnel — sent → opened → clicked → explored —
+      recorded per recipient rather than as a bare campaign counter, so the
+      admin can ask which occasion, which beat and which channel actually
+      moved people.
+
+      openedAt is EMAIL ONLY and is the softest number here: it comes from a
+      tracking pixel, which Gmail proxies and Apple Mail Privacy Protection
+      pre-fetches, so it over-counts. Clicks are the honest metric and the
+      dashboard says so rather than quietly presenting both as equals.
+
+      clickKind separates the two things a click can mean: 'experience' is
+      someone who tapped a suggested experience — the one that matters —
+      while 'browse' is the generic CTA. clickVia records whether they chose
+      the app or the browser at the chooser.
+    */
+    openedAt: { type: DataTypes.DATE, allowNull: true },
+    clickedAt: { type: DataTypes.DATE, allowNull: true },
+    clickCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
+    clickKind: { type: DataTypes.STRING(12), allowNull: true }, // experience | browse
+    clickVia: { type: DataTypes.STRING(10), allowNull: true }, // app | browser
   },
   {
     tableName: 'campaign_dispatches',
@@ -59,6 +84,8 @@ const CampaignDispatch = sequelize.define(
       },
       { fields: ['userId', 'channel'] },
       { fields: ['occurrenceDate'] },
+      // The analytics dashboard filters on these constantly.
+      { fields: ['clickedAt'] },
     ],
   }
 );
