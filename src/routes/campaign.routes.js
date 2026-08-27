@@ -15,6 +15,8 @@ router.get('/analytics', ctrl.analytics);
 router.post('/', ctrl.create);
 router.post('/seed', ctrl.seed);
 router.post('/run-now', ctrl.runNow);
+// Puts existing occasions onto the 7-day countdown (-7/-3/-2/-1/0).
+router.post('/apply-countdown', ctrl.applyCountdownToAll);
 
 router.put('/:id', ctrl.update);
 router.patch('/:id/toggle', ctrl.toggle);

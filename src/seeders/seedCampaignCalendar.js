@@ -1,6 +1,13 @@
 /* eslint-disable no-console */
 require('dotenv').config();
 const { sequelize, CampaignEvent } = require('../models');
+const { applyCountdown } = require('../services/campaignCountdown.service');
+
+// Which occasions the seeded calendar puts on the seven-day countdown.
+// 'emailing' = the big ones (those that already send email); 'all' would put
+// every minor festival on five emails too. The admin can widen it per campaign
+// from Occasion Marketing → "Apply 7-day countdown".
+const COUNTDOWN_SCOPE = process.env.CAMPAIGN_COUNTDOWN_SCOPE === 'all' ? 'all' : 'emailing';
 
 /*
   The occasion calendar, seeded once.
@@ -986,6 +993,18 @@ const DAY_BEFORE_EMAIL = new Set([
 ]);
 
 const applyOffsetChannelPolicy = (campaign) => {
+  /*
+    Big occasions run the seven-day countdown instead of a single day-before
+    nudge: -7 / -3 / -2 / -1 / 0, each beat emailing AND notifying. The copy
+    for those beats is generated (campaignCountdown.service.js), so this only
+    has to set the offsets and the per-beat channel list.
+
+    Anything the countdown does not claim — awareness days, the weekend nudge,
+    birthdays — falls through to the old email-rationing policy below.
+  */
+  const ramp = applyCountdown(campaign, { scope: COUNTDOWN_SCOPE });
+  if (ramp) return { ...campaign, ...ramp };
+
   const offsets = campaign.sendOffsets || [];
   if (!offsets.some((o) => o < 0)) return campaign;
   if (!(campaign.channels || ALL).includes('email')) return campaign;

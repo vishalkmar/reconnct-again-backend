@@ -406,6 +406,19 @@ const start = async () => {
       const { isConfigured } = require('./config/firebaseAdmin');
       console.log(`[SERVER] Push (FCM): ${isConfigured() ? 'configured ✓' : 'NOT configured — set FIREBASE_SERVICE_ACCOUNT to enable push'}`);
     } catch { /* ignore */ }
+    // Same idea for mail. Which transport is live decides everything about
+    // deliverability, and until now the only way to find out was to read the
+    // env vars on the host: "the API said sent" is true for BOTH a Brevo
+    // hand-off and an SMTP server that accepts a message and quietly drops it.
+    // Brevo's API is also IP-restricted when Authorised IPs is switched on, so
+    // knowing which branch is in use is the first question in any mail bug.
+    if (process.env.BREVO_API_KEY) {
+      console.log('[SERVER] Mail: Brevo HTTP API ✓ (sender: %s)', process.env.MAIL_FROM || process.env.EMAIL_FROM || '(default)');
+    } else if (process.env.SMTP_HOST) {
+      console.log('[SERVER] Mail: SMTP %s:%s ✓ (sender: %s)', process.env.SMTP_HOST, process.env.SMTP_PORT || 587, process.env.MAIL_FROM || process.env.EMAIL_FROM || '(default)');
+    } else {
+      console.log('[SERVER] Mail: NOT configured — set BREVO_API_KEY (preferred) or SMTP_HOST');
+    }
     console.log('[SERVER] READY — accepting requests');
   });
 

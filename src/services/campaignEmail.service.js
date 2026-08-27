@@ -1,5 +1,7 @@
 const { send } = require('../pwa/services/mailer');
 const { escapeHtml: esc, emailShell, ctaButton } = require('../utils/emailLayout');
+const { stageBadge, isRampOffset, dayOfSell } = require('./campaignCountdown.service');
+const { prettyKey } = require('../utils/istDate');
 
 /*
   The greeting email. Same shell as every other reconnct mail (emailLayout.js)
@@ -14,12 +16,33 @@ const { escapeHtml: esc, emailShell, ctaButton } = require('../utils/emailLayout
 
 const clientUrl = () => String(process.env.CLIENT_URL || '').replace(/\/$/, '');
 
+/*
+  Every destination link in a greeting goes through /open.html — the
+  app-or-browser chooser (frontend/public/open.html) — rather than straight to
+  the page.
+
+  The reason is that these mails are the one place we reach someone who has
+  the app installed but is reading on a device that will happily open the
+  website instead. A tap from a Diwali mail should be able to land in the app,
+  where they are already signed in and their bookings live; and if they do not
+  have it, that same tap is the best install prompt we will ever get.
+
+  The chooser is a static file, so this adds no redirect hop through the API
+  and no dependency on the backend being up for an email link to work. The
+  real destination rides in `to` as a site-relative path — the chooser
+  validates it before using it, since it arrives from a mail client.
+
+  NOT routed through here: the unsubscribe link. Putting an app upsell in
+  front of someone trying to leave is exactly the behaviour that gets a
+  sending domain reported, so that one stays direct.
+*/
 const linkTo = (path, campaignSlug) => {
   const base = clientUrl();
   const clean = String(path || '/experiences');
   const sep = clean.includes('?') ? '&' : '?';
   // utm tags so the admin can tell campaign traffic apart in analytics.
-  return `${base}${clean}${sep}utm_source=email&utm_medium=occasion&utm_campaign=${encodeURIComponent(campaignSlug)}`;
+  const dest = `${clean}${sep}utm_source=email&utm_medium=occasion&utm_campaign=${encodeURIComponent(campaignSlug)}`;
+  return `${base}/open.html?to=${encodeURIComponent(dest)}`;
 };
 
 // One experience card — image, name, city. Table-based so Outlook behaves.
@@ -53,10 +76,13 @@ const experienceCard = (exp, campaignSlug) => {
  * @param experiences Experience rows to showcase for the lead occasion
  * @param alsoToday   other occasions falling on the same morning, each with
  *                    its own wish and suggestions — see "Also today" below
+ * @param offsetDay   which beat of the run-up this is (-7 … 0)
+ * @param occurrenceDate  the occasion's own date, for the countdown ribbon
  * @param unsubToken  opaque token for the one-click opt-out link
  */
 const sendOccasionGreeting = ({
-  to, name, campaign, title, message, experiences = [], alsoToday = [], unsubToken,
+  to, name, campaign, title, message, experiences = [], alsoToday = [],
+  offsetDay = 0, occurrenceDate = null, unsubToken,
 }) => {
   const cta = linkTo(campaign.ctaPath || '/experiences', campaign.slug);
   const banner = campaign.imageUrl
@@ -67,9 +93,82 @@ const sendOccasionGreeting = ({
          Use code <strong style="letter-spacing:1px;">${esc(campaign.couponCode)}</strong> at checkout
        </div>`
     : '';
+  /*
+    Two different mails share this template, and they must not look alike.
+
+    A RUN-UP mail ("3 days to go") is about a deadline: the most useful thing
+    on the page is how long is left and which day it lands on, so that goes
+    above the headline as a countdown ribbon, carrying the real date because
+    "3 days" alone still needs a calendar.
+
+    The DAY-OF mail is about the day. It gets a festive band instead, the wish
+    on its own, and only then — below a divider — the one line that sells
+    today. Same shell, deliberately different page.
+  */
+  const isDayOf = !isRampOffset(offsetDay);
+
+  const ribbon = !isDayOf
+    ? `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:0 0 14px;">
+         <tr>
+           <td style="background:#fff8e6;border:1px solid #f0c14b;border-radius:999px;padding:6px 14px;color:#8a5a00;font-size:12px;font-weight:700;letter-spacing:.3px;">
+             ⏳ ${esc(stageBadge(offsetDay))}${occurrenceDate ? ` &middot; ${esc(campaign.name)} on ${esc(prettyKey(occurrenceDate))}` : ''}
+           </td>
+         </tr>
+       </table>`
+    /*
+      The day itself gets a FESTIVE band, not a countdown ribbon. Four mails
+      have already arrived with a stopwatch and a deadline on them; the fifth
+      is the one that is actually about the day, and it has to look like it
+      the moment the inbox preview renders — a warm band, the occasion's name,
+      no numbers counting down to anything.
+    */
+    : `<table role="presentation" cellspacing="0" cellpadding="0" style="width:100%;margin:0 0 16px;">
+         <tr>
+           <td align="center" style="background:#fff3d6;border:1px solid #f0c14b;border-radius:12px;padding:10px 14px;color:#8a5a00;font-size:12px;font-weight:700;letter-spacing:2px;text-transform:uppercase;">
+             🎉 ${esc(campaign.name)} &middot; today
+           </td>
+         </tr>
+       </table>`;
+
+  /*
+    Splitting the wish from the sell.
+
+    renderCopy() appends the generated day-of selling line to the wish as a
+    second paragraph. The email pulls it back off so the two can be laid out
+    apart — greeting, divider, then the offer — which is the whole reason the
+    day-of mail reads differently from the four that preceded it.
+
+    Finding it by index rather than at the end matters: the sell line is not
+    always last. Bhai Dooj falls three days after Diwali, so Diwali morning
+    merges Diwali's day-of wish with Bhai Dooj's "3 days to go" — and the
+    merge appends "Coming up: Bhai Dooj in 3 days" AFTER the sell line.
+    Splitting on the index keeps all three parts, in order, in their right
+    places; anything trailing the sell line rides along beneath it.
+
+    indexOf() is the whole test, so there is no flag to keep in sync and no
+    way for the two to disagree. When it does not match — the admin wrote
+    their own day-of message, so nothing was ever appended — the message
+    simply renders whole, exactly as they wrote it.
+  */
+  const sell = isDayOf ? dayOfSell(campaign) : null;
+  const sellAt = sell && message ? String(message).indexOf(sell.line) : -1;
+  const hasSell = sellAt >= 0;
+  const wishText = hasSell ? String(message).slice(0, sellAt).trimEnd() : message;
+  const afterSell = hasSell ? String(message).slice(sellAt + sell.line.length).trim() : '';
+
+  const sellBlock = hasSell
+    ? `<div style="margin:20px 0 0;padding-top:16px;border-top:1px solid #eef1f5;">
+         <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#94a3b8;margin:0 0 6px;">${esc(sell.label)}</div>
+         <p style="color:#374151;line-height:1.65;margin:0;white-space:pre-line;">${esc(sell.line)}</p>
+         ${afterSell ? `<p style="color:#374151;line-height:1.65;margin:10px 0 0;white-space:pre-line;">${esc(afterSell)}</p>` : ''}
+       </div>`
+    : '';
+
   const cards = experiences.length
     ? `<div style="margin:18px 0 4px;">
-         <div style="font-size:13px;font-weight:700;color:#101828;margin:0 0 10px;">Handpicked for the occasion</div>
+         <div style="font-size:13px;font-weight:700;color:#101828;margin:0 0 10px;">
+           ${isDayOf ? 'Still bookable today' : 'Handpicked for the occasion'}
+         </div>
          ${experiences.slice(0, 3).map((e) => experienceCard(e, campaign.slug)).join('')}
        </div>`
     : '';
@@ -84,7 +183,7 @@ const sendOccasionGreeting = ({
     ? `<div style="margin:22px 0 4px;padding-top:18px;border-top:1px solid #eef1f5;">
          ${alsoToday.map((extra) => `
            <div style="margin:0 0 16px;">
-             <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#94a3b8;margin:0 0 4px;">Also today</div>
+             <div style="font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:#94a3b8;margin:0 0 4px;">${esc(extra.offsetDay ? `Coming up · ${extra.stage || ''}` : 'Also today')}</div>
              <div style="font-weight:700;color:#101828;font-size:16px;margin:0 0 6px;">${esc(extra.title || extra.name)}</div>
              ${extra.message ? `<p style="color:#374151;line-height:1.6;margin:0 0 10px;white-space:pre-line;">${esc(extra.message)}</p>` : ''}
              ${(extra.experiences || []).slice(0, 2).map((e) => experienceCard(e, campaign.slug)).join('')}
@@ -101,16 +200,21 @@ const sendOccasionGreeting = ({
 
   // Subject leads with the main occasion; a merged send names the other one
   // too, so the inbox line itself shows both wishes.
-  const subject = alsoToday.length
-    ? `${title} — and happy ${alsoToday.map((e) => e.name).join(' & ')}!`
+  const sameDay = alsoToday.filter((e) => !e.offsetDay);
+  const subject = sameDay.length
+    ? `${title} — and happy ${sameDay.map((e) => e.name).join(' & ')}!`
     : title;
 
   const html = emailShell({
-    preheader: message ? String(message).slice(0, 120) : title,
+    // The inbox preview line. On the day that is the WISH, not the sales
+    // line stapled to the end of it — the preview is the greeting.
+    preheader: wishText ? String(wishText).slice(0, 120) : title,
     bodyHtml: `
       ${banner}
+      ${ribbon}
       <h2 style="margin:0 0 10px;color:#101828;font-size:20px;line-height:1.3;">${esc(title)}</h2>
-      ${message ? `<p style="color:#374151;line-height:1.65;margin:0;white-space:pre-line;">${esc(message)}</p>` : ''}
+      ${wishText ? `<p style="color:#374151;line-height:1.65;margin:0;white-space:pre-line;">${esc(wishText)}</p>` : ''}
+      ${sellBlock}
       ${coupon}
       ${cards}
       ${also}

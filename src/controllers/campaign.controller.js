@@ -11,6 +11,9 @@ const {
 const { sweepOccasionCampaigns, loadExperiencePool } = require('../services/campaignSweep.service');
 const { sendOccasionGreeting } = require('../services/campaignEmail.service');
 const { sendPushToUser } = require('../services/push.service');
+const {
+  applyCountdown, isOnCountdown, isCountdownCampaign, COUNTDOWN_OFFSETS, stageBadge,
+} = require('../services/campaignCountdown.service');
 const { seedCampaignCalendar } = require('../seeders/seedCampaignCalendar');
 const { makeToken, readToken } = require('../utils/unsubscribeToken');
 
@@ -155,6 +158,9 @@ const list = asyncHandler(async (req, res) => {
       nextOccurrence: next,
       nextOccurrenceLabel: next ? prettyKey(next) : null,
       stats: stats.get(json.id) || { sent: 0, failed: 0 },
+      // Is this occasion running the full seven-day run-up, and could it?
+      onCountdown: isOnCountdown(json),
+      canCountdown: isCountdownCampaign(json),
     };
   });
 
@@ -241,46 +247,134 @@ const test = asyncHandler(async (req, res) => {
   if (!row) return fail(res, 'Campaign not found', 404);
 
   const campaign = row.toJSON();
-  const email = String(req.body?.email || '').trim();
   const offsetDay = Number(req.body?.offsetDay ?? 0);
-  const pushUserId = Number(req.body?.userId) || null;
-  if (!email && !pushUserId) return fail(res, 'Give an email address (or a userId for a test push)', 400);
+  const name = String(req.body?.name || req.admin?.name || 'there');
 
-  const copy = renderCopy(campaign, offsetDay, { name: req.body?.name || 'there' });
-  const result = { email: null, push: null };
+  /*
+    One click has to exercise BOTH channels, because the two fail in
+    completely different ways and an admin who only ever sees the email has
+    no idea whether the phone would have buzzed.
 
-  if (email) {
+    Defaults are chosen so the button works with nothing typed in: the
+    signed-in admin's own address, and the app account registered against
+    that same address for the push. Anything explicit in the body wins.
+  */
+  // req.admin, not req.user — this router runs the ADMIN authenticate
+  // middleware, which attaches the Admin row.
+  const email = String(req.body?.email || req.admin?.email || '').trim();
+  const wantEmail = req.body?.email !== '' && !!email;
+  const wantPush = req.body?.push !== false;
+
+  let pushUserId = Number(req.body?.userId) || null;
+  if (wantPush && !pushUserId && email) {
+    // The app account that owns this address — that is the phone the admin is
+    // holding, which is the phone they want the test to land on.
+    const target = await User.findOne({ where: { email }, attributes: ['id', 'fcmToken'] });
+    pushUserId = target ? target.id : null;
+  }
+  if (!wantEmail && !wantPush) return fail(res, 'Nothing to test — pick email, push, or both', 400);
+
+  const copy = renderCopy(campaign, offsetDay, { name });
+  const result = { email: null, push: null, stage: stageBadge(offsetDay) };
+
+  if (wantEmail) {
     const pool = await loadExperiencePool(campaign);
     try {
       await sendOccasionGreeting({
         to: email,
-        name: req.body?.name || 'there',
+        name,
         campaign,
         title: copy.title,
         message: copy.message,
         experiences: pool.slice(0, 3),
+        offsetDay,
+        // The real occurrence, so the "3 days to go · Diwali on 8 Nov 2026"
+        // ribbon in a test says what it will say on the day.
+        occurrenceDate: nextOccurrence(campaign, istDateKey()),
         unsubToken: makeToken(0), // inert token — a test can't opt anyone out
       });
-      result.email = 'sent';
+      result.email = { ok: true, to: email };
     } catch (err) {
-      result.email = `failed: ${err.message}`;
+      result.email = { ok: false, to: email, reason: err.message };
     }
   }
 
-  if (pushUserId) {
-    try {
-      await sendPushToUser(pushUserId, {
+  if (wantPush) {
+    if (!pushUserId) {
+      result.push = {
+        ok: false,
+        reason: email
+          ? `no app account signed in as ${email} — sign in on the phone with that address, or pass a userId`
+          : 'no target account for the push',
+      };
+    } else {
+      // sendPushToUser reports WHY nothing arrived (not configured / no device
+      // token / dead token) instead of failing silently — that reason is the
+      // whole value of a test button, so it is passed straight through.
+      const r = await sendPushToUser(pushUserId, {
         title: copy.title,
         body: copy.message || campaign.name,
-        data: { kind: 'campaign', campaignSlug: campaign.slug, ctaPath: campaign.ctaPath || '/experiences' },
+        data: {
+          kind: 'campaign',
+          campaignSlug: campaign.slug,
+          ctaPath: campaign.ctaPath || '/experiences',
+          test: '1',
+        },
       });
-      result.push = 'sent';
-    } catch (err) {
-      result.push = `failed: ${err.message}`;
+      result.push = { ...r, userId: pushUserId };
     }
   }
 
-  return ok(res, { preview: copy, result }, 'Test dispatched');
+  const parts = [
+    result.email ? `email ${result.email.ok ? 'sent' : 'failed'}` : null,
+    result.push ? `push ${result.push.ok ? 'sent' : 'failed'}` : null,
+  ].filter(Boolean);
+  return ok(res, { preview: copy, result }, `Test: ${parts.join(', ')}`);
+});
+
+/*
+  POST /api/admin/campaigns/apply-countdown  { scope?, ids? }
+
+  Puts existing occasions onto the seven-day run-up (-7 / -3 / -2 / -1 / 0).
+
+  The seeder already ships the ramp, but seeding is idempotent by slug and
+  deliberately never overwrites a stored row — so a calendar that was loaded
+  before the countdown existed would keep its old two-beat schedule forever.
+  This is the migration for that, as a button rather than a script the admin
+  cannot run.
+
+  scope 'emailing' (default) upgrades the occasions that already email — the
+  big ones. scope 'all' also sweeps in the minor push-only festivals, which
+  is a real choice: it is five more sends per occasion across ~30 more
+  occasions. Hand-written per-offset copy is never touched either way.
+*/
+const applyCountdownToAll = asyncHandler(async (req, res) => {
+  const scope = req.body?.scope === 'all' ? 'all' : 'emailing';
+  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : null;
+
+  const rows = await CampaignEvent.findAll(ids ? { where: { id: { [Op.in]: ids } } } : {});
+  const changed = [];
+  let skipped = 0;
+
+  for (const row of rows) {
+    const json = row.toJSON();
+    // A per-campaign apply (ids given) is an explicit choice, so it ignores
+    // the emailing/push-only distinction the bulk default draws.
+    const ramp = applyCountdown(json, { scope: ids ? 'all' : scope });
+    if (!ramp) { skipped += 1; continue; }
+    if (isOnCountdown(json)) { skipped += 1; continue; }
+    // eslint-disable-next-line no-await-in-loop
+    await row.update(ramp);
+    changed.push({ id: json.id, name: json.name, channels: json.channels });
+  }
+
+  return ok(
+    res,
+    { updated: changed.length, skipped, campaigns: changed, offsets: COUNTDOWN_OFFSETS },
+    changed.length
+      ? `${changed.length} occasion(s) now run the 7-day countdown`
+      : 'Everything eligible is already on the countdown'
+  );
 });
 
 // POST /api/admin/campaigns/run-now  { id?, date? } — force today's due waves.
@@ -405,6 +499,7 @@ const resubscribe = asyncHandler(async (req, res) => {
 module.exports = {
   list,
   upcomingSchedule,
+  applyCountdownToAll,
   create,
   update,
   toggle,

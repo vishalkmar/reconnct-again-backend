@@ -128,6 +128,22 @@ const downloadUrl = (url) =>
     }).on('error', reject);
   });
 
+/**
+ * One line per accepted hand-off, so "it says sent but nothing arrived" is
+ * answerable from the server log. Deliberately omits the subject — OTP
+ * subjects carry the live code — and names the transport and sender, because
+ * an unverified sender is the usual reason a provider accepts and then drops.
+ */
+const logAccepted = (transport, recipients, messageId) => {
+  console.log(
+    '[mail] accepted by %s | from=%s | to=%s | messageId=%s',
+    transport,
+    FROM(),
+    recipients.map((r) => r.email).join(', '),
+    messageId || '(none returned)'
+  );
+};
+
 const send = async ({ to, subject, html, text, replyTo, attachments }) => {
   const recipients = parseRecipients(to || process.env.SMTP_TO || process.env.SMTP_To);
   if (!recipients.length) {
@@ -139,7 +155,7 @@ const send = async ({ to, subject, html, text, replyTo, attachments }) => {
   //    send over HTTPS — which is never blocked. API-key auth is not tied to an
   //    IP allow-list, so it works from any (even changing) server IP.
   if (process.env.BREVO_API_KEY) {
-    return postBrevoEmail({
+    const result = await postBrevoEmail({
       sender: parseAddress(FROM()),
       to: recipients,
       replyTo: replyTo ? parseAddress(replyTo) : undefined,
@@ -151,13 +167,21 @@ const send = async ({ to, subject, html, text, replyTo, attachments }) => {
         content: Buffer.from(attachment.content).toString('base64'),
       })),
     });
+    // Accepted by Brevo is NOT the same as delivered to the inbox: Brevo can
+    // still block, bounce or hold the message afterwards, and until now a
+    // successful hand-off logged nothing at all — leaving "the app says sent
+    // but no email arrived" with no thread to pull. The messageId is the
+    // handle to search for in Brevo → Transactional → Logs.
+    // NEVER log `subject`: OTP subjects contain the code itself.
+    logAccepted('brevo', recipients, result && result.messageId);
+    return result;
   }
 
   // 2) Fallback: plain SMTP (any provider) — used in environments where SMTP is
   //    allowed and no Brevo key is configured (e.g. local dev with Gmail).
   const transport = getSmtpTransport();
   if (transport) {
-    return transport.sendMail({
+    const info = await transport.sendMail({
       from: FROM(),
       to: recipients.map((r) => r.email).join(', '),
       replyTo: replyTo || undefined,
@@ -169,6 +193,13 @@ const send = async ({ to, subject, html, text, replyTo, attachments }) => {
         content: Buffer.from(a.content),
       })),
     });
+    // `rejected` is the one nodemailer field that catches a server accepting
+    // the session but refusing a recipient — a silent no-delivery otherwise.
+    if (info && info.rejected && info.rejected.length) {
+      console.warn('[mail] SMTP rejected recipient(s):', info.rejected.join(', '));
+    }
+    logAccepted('smtp', recipients, info && info.messageId);
+    return info;
   }
 
   throw new Error('No email transport configured. Set BREVO_API_KEY (preferred) or SMTP_HOST (+ SMTP_USER/SMTP_PASS) in .env');
