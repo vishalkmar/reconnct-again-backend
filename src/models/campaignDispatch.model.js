@@ -73,6 +73,21 @@ const CampaignDispatch = sequelize.define(
     clickCount: { type: DataTypes.INTEGER, allowNull: false, defaultValue: 0 },
     clickKind: { type: DataTypes.STRING(12), allowNull: true }, // experience | browse
     clickVia: { type: DataTypes.STRING(10), allowNull: true }, // app | browser
+
+    /*
+      What happened AFTER the click — the half a click alone cannot tell you.
+
+      A click says somebody tapped. It does not say whether they arrived,
+      whether they stayed, or whether they bounced in two seconds. `landedAt`
+      is the site confirming the page actually rendered, and `dwellSeconds` is
+      how long they stayed on it, reported by the page itself as it unloads.
+
+      dwellSeconds is capped when recorded: a tab left open overnight is not a
+      45,000-second reading session, and one such row would wreck an average.
+    */
+    landedAt: { type: DataTypes.DATE, allowNull: true },
+    dwellSeconds: { type: DataTypes.INTEGER, allowNull: true },
+
   },
   {
     tableName: 'campaign_dispatches',

@@ -11,6 +11,8 @@ router.use(authenticate);
 router.get('/', ctrl.list);
 router.get('/upcoming', ctrl.upcomingSchedule);
 router.get('/analytics', ctrl.analytics);
+// The named list behind the percentages — who opened, clicked, stayed, booked.
+router.get('/recipients', ctrl.recipients);
 
 router.post('/', ctrl.create);
 router.post('/seed', ctrl.seed);

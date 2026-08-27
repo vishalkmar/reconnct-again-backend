@@ -67,6 +67,8 @@ const migrate = async () => {
   await addColumnIfMissing('campaign_dispatches', 'clickCount', 'INT NOT NULL DEFAULT 0', summary);
   await addColumnIfMissing('campaign_dispatches', 'clickKind', 'VARCHAR(12) NULL', summary);
   await addColumnIfMissing('campaign_dispatches', 'clickVia', 'VARCHAR(10) NULL', summary);
+  await addColumnIfMissing('campaign_dispatches', 'landedAt', 'DATETIME NULL', summary);
+  await addColumnIfMissing('campaign_dispatches', 'dwellSeconds', 'INT NULL', summary);
 
   return summary;
 };

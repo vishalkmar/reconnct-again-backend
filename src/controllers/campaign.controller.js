@@ -1,5 +1,5 @@
 const asyncHandler = require('express-async-handler');
-const { Op, fn, col } = require('sequelize');
+const { Op, fn, col, literal } = require('sequelize');
 const {
   CampaignEvent, CampaignDispatch, User, Booking,
 } = require('../models');
@@ -471,10 +471,13 @@ const analytics = asyncHandler(async (req, res) => {
     failed: 0,
     opened: 0,
     clicked: 0,
+    landed: 0,
     explored: 0,
     clicks: 0,
     viaApp: 0,
     viaBrowser: 0,
+    dwellTotal: 0,
+    dwellCount: 0,
     people: new Set(),
   });
 
@@ -489,14 +492,23 @@ const analytics = asyncHandler(async (req, res) => {
       if (r.clickKind === 'experience') acc.explored += 1;
       if (r.clickVia === 'app') acc.viaApp += 1; else acc.viaBrowser += 1;
     }
+    if (r.landedAt) acc.landed += 1;
+    // Averaged over the people who reported a stay, not over everyone sent —
+    // dividing by the whole audience would make the average meaningless.
+    if (r.dwellSeconds > 0) { acc.dwellTotal += r.dwellSeconds; acc.dwellCount += 1; }
     return acc;
   };
 
   // Sets are how "people" stays a headcount rather than a message count; they
   // are collapsed to a size on the way out.
   const finish = (a) => {
-    const { people, ...rest } = a;
-    return { ...rest, people: people.size };
+    const { people, dwellTotal, dwellCount, ...rest } = a;
+    return {
+      ...rest,
+      people: people.size,
+      dwellCount,
+      avgDwellSeconds: dwellCount ? Math.round(dwellTotal / dwellCount) : 0,
+    };
   };
 
   const overall = blank();
@@ -595,10 +607,44 @@ const analytics = asyncHandler(async (req, res) => {
   const channels = {};
   for (const [name, acc] of byChannel) channels[name] = finish(acc);
 
+  /*
+    Tracking health, reported alongside the numbers.
+
+    Zeroes across an engagement dashboard have two boring causes and one
+    interesting one, and an admin cannot tell them apart by looking:
+
+      1. the messages predate tracking — nothing was instrumented to report,
+      2. APP_URL is unset on THIS server, so no pixel URL can be built and
+         every mail goes out unmeasured however many are sent,
+      3. people genuinely did not engage.
+
+    Only the third is worth acting on, so the first two are stated outright
+    rather than left to be discovered. `trackedSent` counts messages that
+    actually carried tracking — a dispatch sent after the feature existed —
+    approximated by the earliest row that ever recorded an open or a click.
+  */
+  // Reduced, not sorted: Array#sort on Date objects compares them as strings
+  // ("Mon Aug 24 …"), which orders by weekday name. And it reads the folded
+  // plain objects rather than the model instances, so the shape is the same
+  // one every other number on this page was computed from.
+  let trackedFrom = null;
+  for (const row of rows) {
+    const r = row.toJSON();
+    if (!(r.openedAt || r.clickedAt || r.landedAt) || !r.sentAt) continue;
+    if (!trackedFrom || new Date(r.sentAt) < new Date(trackedFrom)) trackedFrom = r.sentAt;
+  }
+
   return ok(res, {
     days,
     since,
     attributionDays: ATTRIBUTION_DAYS,
+    tracking: {
+      // Without APP_URL there is no absolute URL to point a pixel at, so
+      // campaignEmail.service emits none and every send is unmeasured.
+      enabled: !!String(process.env.APP_URL || '').trim(),
+      pixelBase: String(process.env.APP_URL || '').replace(/\/$/, ''),
+      firstEngagementAt: trackedFrom,
+    },
     filters: {
       type: typeFilter,
       campaignId: Number(req.query.campaignId) || null,
@@ -731,6 +777,211 @@ const trackClick = asyncHandler(async (req, res) => {
 });
 
 /*
+  GET /api/admin/campaigns/recipients?days=&campaignId=&channel=&offsetDay=&state=&page=
+
+  The named list behind every percentage on the analytics page.
+
+  A rate answers "did it work"; it never answers "who". This does — one row
+  per person per message, with what they did and when, so an admin can pull up
+  the twelve people a Diwali mail actually moved instead of reading 4.7% and
+  guessing. `state` is the same funnel as the chart, used as a filter:
+
+      opened | clicked | explored | landed | booked | nothing
+
+  Attribution is computed here rather than cached on the row. Caching it would
+  freeze the answer at whatever ATTRIBUTION_DAYS was on the day it ran, and
+  the window is exactly the sort of thing that gets tuned — a stored number
+  would quietly stop matching the dashboard above it.
+*/
+const recipients = asyncHandler(async (req, res) => {
+  const days = Math.min(Math.max(Number(req.query.days) || 90, 1), 730);
+  const since = addDaysToKey(istDateKey(), -days);
+  const page = Math.max(Number(req.query.page) || 1, 1);
+  const perPage = 50;
+
+  const where = { occurrenceDate: { [Op.gte]: since } };
+  if (Number(req.query.campaignId)) where.campaignEventId = Number(req.query.campaignId);
+  if (['email', 'push', 'inapp'].includes(req.query.channel)) where.channel = req.query.channel;
+  if (req.query.offsetDay !== undefined && req.query.offsetDay !== '') {
+    const o = Number(req.query.offsetDay);
+    if (Number.isInteger(o)) where.offsetDay = o;
+  }
+
+  // The funnel filters are all "this column is set", which keeps them
+  // expressible in SQL rather than pulling everything back to filter in JS.
+  const state = String(req.query.state || '');
+  if (state === 'opened') where.openedAt = { [Op.ne]: null };
+  if (state === 'clicked') where.clickedAt = { [Op.ne]: null };
+  if (state === 'landed') where.landedAt = { [Op.ne]: null };
+  if (state === 'explored') where.clickKind = 'experience';
+  if (state === 'nothing') { where.openedAt = null; where.clickedAt = null; }
+
+  const { rows, count } = await CampaignDispatch.findAndCountAll({
+    where,
+    include: [
+      { model: CampaignEvent, as: 'campaign', attributes: ['id', 'name', 'slug', 'type'] },
+    ],
+    attributes: [
+      'id', 'campaignEventId', 'userId', 'channel', 'status', 'offsetDay', 'occurrenceDate',
+      'sentAt', 'openedAt', 'clickedAt', 'clickCount', 'clickKind', 'clickVia',
+      'landedAt', 'dwellSeconds',
+    ],
+    // Most engaged first: the people who did something are the point of the
+    // list, and burying them under a thousand "delivered, nothing" rows would
+    // make the page useless at exactly the size where it starts to matter.
+    order: [
+      [literal('clickedAt IS NULL'), 'ASC'],
+      ['clickedAt', 'DESC'],
+      [literal('openedAt IS NULL'), 'ASC'],
+      ['sentAt', 'DESC'],
+    ],
+    limit: perPage,
+    offset: (page - 1) * perPage,
+  });
+
+  // Names/emails in one query rather than a join per row.
+  const userIds = [...new Set(rows.map((r) => r.userId))];
+  const users = userIds.length
+    ? await User.findAll({ where: { id: { [Op.in]: userIds } }, attributes: ['id', 'name', 'email', 'city'] })
+    : [];
+  const userById = new Map(users.map((u) => [u.id, u.toJSON()]));
+
+  /*
+    Bookings for the people on THIS page only, matched back against each
+    person's own click. Scoped to the page because the list is paginated and
+    the alternative — every booking by every clicker in the window — is a far
+    larger query for rows nobody is looking at.
+  */
+  const clickers = rows.filter((r) => r.clickedAt);
+  let bookingByUser = new Map();
+  if (clickers.length) {
+    const earliest = clickers
+      .map((r) => new Date(r.clickedAt))
+      .reduce((a, b) => (a < b ? a : b));
+    const bookings = await Booking.findAll({
+      where: {
+        userId: { [Op.in]: clickers.map((r) => r.userId) },
+        status: { [Op.in]: ['confirmed', 'completed'] },
+        createdAt: { [Op.gte]: earliest },
+      },
+      attributes: ['id', 'bookingCode', 'userId', 'totalPaise', 'createdAt'],
+      limit: 2000,
+    });
+    const windowMs = ATTRIBUTION_DAYS * 24 * 60 * 60 * 1000;
+    for (const b of bookings) {
+      const own = clickers.filter((r) => r.userId === b.userId);
+      for (const r of own) {
+        const gap = new Date(b.createdAt) - new Date(r.clickedAt);
+        if (gap < 0 || gap > windowMs) continue;
+        const prev = bookingByUser.get(r.id);
+        if (!prev || new Date(b.createdAt) < new Date(prev.createdAt)) {
+          bookingByUser.set(r.id, b.toJSON());
+        }
+      }
+    }
+  }
+
+  const items = rows.map((row) => {
+    const j = row.toJSON();
+    const u = userById.get(j.userId) || {};
+    const booking = bookingByUser.get(j.id) || null;
+    return {
+      id: j.id,
+      user: {
+        id: j.userId, name: u.name || `User #${j.userId}`, email: u.email || null, city: u.city || null,
+      },
+      campaign: (j.campaign && j.campaign.name) || '(deleted)',
+      campaignId: j.campaignEventId,
+      channel: j.channel,
+      status: j.status,
+      offsetDay: j.offsetDay,
+      occurrenceDate: j.occurrenceDate,
+      sentAt: j.sentAt,
+      openedAt: j.openedAt,
+      clickedAt: j.clickedAt,
+      clickCount: j.clickCount,
+      clickKind: j.clickKind,
+      clickVia: j.clickVia,
+      landedAt: j.landedAt,
+      dwellSeconds: j.dwellSeconds,
+      booking: booking
+        ? { code: booking.bookingCode, paise: booking.totalPaise, at: booking.createdAt }
+        : null,
+    };
+  });
+
+  return ok(res, {
+    items,
+    page,
+    perPage,
+    total: count,
+    pages: Math.max(Math.ceil(count / perPage), 1),
+    attributionDays: ATTRIBUTION_DAYS,
+  });
+});
+
+/*
+  GET /api/campaigns/t/land.gif?t=<token>
+
+  The site confirming the page actually rendered.
+
+  A click and a visit are not the same event, and the gap between them is
+  worth seeing: a phone that opened the chooser and then lost signal counts as
+  a click and never as a landing. This is fired by the website once the
+  destination page has mounted, so "clicked 40, landed 31" is a real and
+  actionable difference rather than a rounding error.
+*/
+const trackLand = asyncHandler(async (req, res) => {
+  const id = readTrackToken(req.query.t);
+  if (id) {
+    try {
+      await CampaignDispatch.update(
+        { landedAt: new Date() },
+        { where: { id, landedAt: null } }
+      );
+    } catch (err) {
+      console.warn('[occasion] land tracking failed:', err.message);
+    }
+  }
+  return sendPixel(res);
+});
+
+/*
+  GET|POST /api/campaigns/t/dwell?t=<token>&s=<seconds>
+
+  How long they stayed, reported by the page as it goes away.
+
+  POST exists because that is what navigator.sendBeacon sends, and sendBeacon
+  is the only thing a browser reliably delivers during unload — an <img> fired
+  at that moment is frequently cancelled. Everything travels in the query
+  string, so the beacon needs no body and no content-type negotiation, which
+  keeps it a "simple" cross-origin request with no preflight.
+
+  DWELL_CAP_SECONDS is not tidiness. A tab left open overnight reports 40,000
+  seconds, and a single row like that moves an average more than a hundred
+  honest ones — the cap is what keeps "average time on page" a number anybody
+  can act on. The LONGEST reading wins, because a page can report several
+  times (tab hidden, then closed) and the last report is not the largest.
+*/
+const DWELL_CAP_SECONDS = 30 * 60;
+
+const trackDwell = asyncHandler(async (req, res) => {
+  const id = readTrackToken(req.query.t);
+  const seconds = Math.min(Math.max(Math.round(Number(req.query.s) || 0), 0), DWELL_CAP_SECONDS);
+  if (id && seconds > 0) {
+    try {
+      const row = await CampaignDispatch.findByPk(id);
+      if (row && seconds > (row.dwellSeconds || 0)) {
+        await row.update({ dwellSeconds: seconds, landedAt: row.landedAt || new Date() });
+      }
+    } catch (err) {
+      console.warn('[occasion] dwell tracking failed:', err.message);
+    }
+  }
+  return sendPixel(res);
+});
+
+/*
   GET|POST /api/campaigns/unsubscribe?token=…  (public, no auth)
   One-click opt-out from the footer of every greeting email.
 */
@@ -765,6 +1016,9 @@ module.exports = {
   analytics,
   unsubscribe,
   resubscribe,
+  recipients,
   trackOpen,
   trackClick,
+  trackLand,
+  trackDwell,
 };

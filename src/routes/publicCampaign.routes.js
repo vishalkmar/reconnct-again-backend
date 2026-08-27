@@ -18,6 +18,11 @@ const ctrl = require('../controllers/campaign.controller');
 */
 router.get('/t/open.gif', ctrl.trackOpen);
 router.get('/t/click.gif', ctrl.trackClick);
+// Fired by the website itself once the destination page has rendered, and
+// again as it unloads. POST is what navigator.sendBeacon sends.
+router.get('/t/land.gif', ctrl.trackLand);
+router.get('/t/dwell', ctrl.trackDwell);
+router.post('/t/dwell', ctrl.trackDwell);
 
 router.get('/unsubscribe', ctrl.unsubscribe);
 router.post('/unsubscribe', ctrl.unsubscribe);
