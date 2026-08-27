@@ -3,6 +3,7 @@ const {
 } = require('../utils/istDate');
 const {
   countdownCopy, dayOfSell, stageBadge, isRampOffset,
+  isCountdownCampaign, COUNTDOWN_OFFSETS,
 } = require('./campaignCountdown.service');
 
 /*
@@ -94,6 +95,27 @@ const isOccurrence = (campaign, dateKey) => {
 };
 
 /**
+ * The beats this occasion actually sends on.
+ *
+ * The seven-day run-up is not a feature to switch on — for a festival, a
+ * national holiday, a sale or a personal date it is simply how the calendar
+ * works, the same way "wish them on the day" is. So the five beats are the
+ * DEFAULT here rather than something an admin has to remember to apply, and a
+ * calendar seeded before the countdown existed behaves like one seeded after
+ * it with no migration and no button.
+ *
+ * Union, not replacement: anything the admin has added themselves (a -14 for
+ * a sale, say) survives. They can only ever end up with more beats than the
+ * default, never fewer — which is the safe direction for the one thing that
+ * would otherwise fail silently on the morning it mattered.
+ */
+const effectiveOffsets = (campaign) => {
+  const stored = normaliseOffsets(campaign.sendOffsets);
+  if (!isCountdownCampaign(campaign)) return stored;
+  return normaliseOffsets([...new Set([...stored, ...COUNTDOWN_OFFSETS])]);
+};
+
+/**
  * Every (campaign, occurrenceDate, offsetDay) that should go out on `sendDate`.
  * Pass the campaign rows in; the caller owns the DB query.
  */
@@ -101,7 +123,7 @@ const dueOn = (campaigns, sendDate = istDateKey()) => {
   const due = [];
   for (const campaign of campaigns) {
     if (!campaign.isActive) continue;
-    for (const offset of normaliseOffsets(campaign.sendOffsets)) {
+    for (const offset of effectiveOffsets(campaign)) {
       const occurrenceDate = addDaysToKey(sendDate, -offset);
       if (isOccurrence(campaign, occurrenceDate)) {
         due.push({ campaign, occurrenceDate, offsetDay: offset, sendDate });
@@ -409,7 +431,7 @@ const lookAheadFor = (campaigns, hit, { sendDate = istDateKey() } = {}) => {
     .filter((next) => next.offsetDay === 0)
     .filter((next) => next.campaign.id !== hit.campaign.id)
     .filter((next) => next.campaign.recurrence !== 'user_field')
-    .filter((next) => !normaliseOffsets(next.campaign.sendOffsets).includes(-1))
+    .filter((next) => !effectiveOffsets(next.campaign).includes(-1))
     .filter((next) => audienceKey(next) === groupAudience)
     .map((next) => ({ ...next, preview: true }));
 };
@@ -477,6 +499,7 @@ module.exports = {
   majorOccasionDates,
   holdForBiggerOccasion,
   lookAheadFor,
+  effectiveOffsets,
   renderTemplate,
   normaliseOffsets,
   normaliseChannels,

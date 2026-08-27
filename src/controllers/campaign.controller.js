@@ -6,17 +6,15 @@ const {
 const { ok, created, fail } = require('../utils/response');
 const { istDateKey, prettyKey, addDaysToKey } = require('../utils/istDate');
 const {
-  upcoming, nextOccurrence, normaliseOffsets, normaliseChannels, renderCopy,
+  upcoming, nextOccurrence, normaliseOffsets, normaliseChannels, renderCopy, effectiveOffsets,
 } = require('../services/campaignCalendar.service');
 const { sweepOccasionCampaigns, loadExperiencePool } = require('../services/campaignSweep.service');
 const { sendOccasionGreeting } = require('../services/campaignEmail.service');
 const { sendPushToUser } = require('../services/push.service');
-const {
-  applyCountdown, isOnCountdown, isCountdownCampaign, COUNTDOWN_OFFSETS, stageBadge,
-} = require('../services/campaignCountdown.service');
+const { isCountdownCampaign, stageBadge } = require('../services/campaignCountdown.service');
 const { seedCampaignCalendar } = require('../seeders/seedCampaignCalendar');
 const { makeToken, readToken } = require('../utils/unsubscribeToken');
-const { readTrackToken } = require('../utils/campaignTrackToken');
+const { makeTrackToken, readTrackToken } = require('../utils/campaignTrackToken');
 
 /*
   Admin → Occasion Marketing. CRUD over the greeting calendar plus the three
@@ -159,9 +157,15 @@ const list = asyncHandler(async (req, res) => {
       nextOccurrence: next,
       nextOccurrenceLabel: next ? prettyKey(next) : null,
       stats: stats.get(json.id) || { sent: 0, failed: 0 },
-      // Is this occasion running the full seven-day run-up, and could it?
-      onCountdown: isOnCountdown(json),
-      canCountdown: isCountdownCampaign(json),
+      /*
+        The beats that will ACTUALLY fire, not the ones stored. The run-up is
+        the default for a festival now rather than something applied, so a row
+        seeded with [-1, 0] really sends five — and an editor showing the
+        stored pair would simply be lying about the schedule.
+      */
+      sendOffsets: effectiveOffsets(json),
+      storedOffsets: json.sendOffsets,
+      onCountdown: isCountdownCampaign(json),
     };
   });
 
@@ -243,6 +247,70 @@ const remove = asyncHandler(async (req, res) => {
   email before a wave goes out. Deliberately does NOT write a dispatch row:
   a test must never consume a recipient's real slot for the occasion.
 */
+/*
+  A test send has to be TRACKED, or it cannot do the one job a test exists for.
+
+  Until now the test path deliberately created no dispatch row and passed no
+  track token — the reasoning being that a test must never consume somebody's
+  real greeting slot or inflate the numbers. Both of those are still true. But
+  the consequence was that the only tool an admin has for producing a greeting
+  on demand produced the ONE kind of greeting whose links cannot be measured,
+  so "is tracking working?" was unanswerable by any means available in the
+  product.
+
+  So a test now gets a real dispatch row, with three things that keep it from
+  contaminating anything:
+
+    - `isTest: true`, and every report filters these out by default.
+    - `occurrenceDate` is TODAY, not the occasion's real date. That is what
+      stops it colliding with the genuine row for Diwali-on-8-Nov and stealing
+      that person's actual wish — the unique index is
+      (campaign, occurrenceDate, offset, user, channel), so a different date is
+      a different slot.
+    - a repeat test on the same day REUSES the row instead of failing on the
+      unique index, so the admin can press the button as often as they like.
+
+  Needs a User to attach to. Where the test address has no account, the mail
+  still goes out — just unmeasured, and the response says so rather than
+  silently producing a link that records nothing.
+*/
+const testDispatchFor = async ({ campaign, offsetDay, userId, channel }) => {
+  if (!userId) return null;
+  const today = istDateKey();
+  const key = {
+    campaignEventId: campaign.id,
+    occurrenceDate: today,
+    offsetDay,
+    userId,
+    channel,
+  };
+  try {
+    return await CampaignDispatch.create({
+      ...key,
+      status: 'sent',
+      isTest: true,
+      title: `[test] ${campaign.name}`,
+      ctaPath: campaign.ctaPath || '/experiences',
+      sentAt: new Date(),
+    });
+  } catch (err) {
+    if (err.name === 'SequelizeUniqueConstraintError') {
+      // Tested this beat already today — reuse the row so the same link keeps
+      // reporting rather than the button failing on the second press.
+      const existing = await CampaignDispatch.findOne({ where: key });
+      if (existing) {
+        await existing.update({
+          sentAt: new Date(), openedAt: null, clickedAt: null, clickCount: 0,
+          clickKind: null, clickVia: null, landedAt: null, dwellSeconds: null,
+        });
+        return existing;
+      }
+    }
+    console.warn('[occasion] test dispatch row failed:', err.message);
+    return null;
+  }
+};
+
 const test = asyncHandler(async (req, res) => {
   const row = await CampaignEvent.findByPk(req.params.id);
   if (!row) return fail(res, 'Campaign not found', 404);
@@ -266,13 +334,21 @@ const test = asyncHandler(async (req, res) => {
   const wantEmail = req.body?.email !== '' && !!email;
   const wantPush = req.body?.push !== false;
 
-  let pushUserId = Number(req.body?.userId) || null;
-  if (wantPush && !pushUserId && email) {
-    // The app account that owns this address — that is the phone the admin is
-    // holding, which is the phone they want the test to land on.
-    const target = await User.findOne({ where: { email }, attributes: ['id', 'fcmToken'] });
-    pushUserId = target ? target.id : null;
+  /*
+    Resolve the target account ONCE, and independently of whether a push was
+    asked for. It was previously looked up only on the push path, which meant
+    an email-only test had no user to attach a dispatch row to and therefore
+    went out untracked — the tracking of a mail has nothing to do with whether
+    a notification was also requested.
+  */
+  let targetUserId = Number(req.body?.userId) || null;
+  if (!targetUserId && email) {
+    // The app account that owns this address — that is the phone and inbox
+    // the admin is holding, which is where the test should land.
+    const target = await User.findOne({ where: { email }, attributes: ['id'] });
+    targetUserId = target ? target.id : null;
   }
+  const pushUserId = targetUserId;
   if (!wantEmail && !wantPush) return fail(res, 'Nothing to test — pick email, push, or both', 400);
 
   const copy = renderCopy(campaign, offsetDay, { name });
@@ -280,6 +356,11 @@ const test = asyncHandler(async (req, res) => {
 
   if (wantEmail) {
     const pool = await loadExperiencePool(campaign);
+    // A real, flagged dispatch row — so every link in this mail is tracked
+    // exactly as a live one would be, without touching the live numbers.
+    const testRow = await testDispatchFor({
+      campaign, offsetDay, userId: targetUserId, channel: 'email',
+    });
     try {
       await sendOccasionGreeting({
         to: email,
@@ -292,9 +373,19 @@ const test = asyncHandler(async (req, res) => {
         // The real occurrence, so the "3 days to go · Diwali on 8 Nov 2026"
         // ribbon in a test says what it will say on the day.
         occurrenceDate: nextOccurrence(campaign, istDateKey()),
+        trackToken: testRow ? makeTrackToken(testRow.id) : null,
         unsubToken: makeToken(0), // inert token — a test can't opt anyone out
       });
-      result.email = { ok: true, to: email };
+      result.email = {
+        ok: true,
+        to: email,
+        tracked: !!testRow,
+        // Said out loud, because an untracked test that looks identical to a
+        // tracked one is how somebody concludes tracking is broken.
+        note: testRow
+          ? 'links and open pixel are tracked — tick “include test sends” in Analytics to watch it'
+          : `no app account for ${email}, so this mail could not be tracked — sign in on the site with that address, or set an App user ID`,
+      };
     } catch (err) {
       result.email = { ok: false, to: email, reason: err.message };
     }
@@ -331,51 +422,6 @@ const test = asyncHandler(async (req, res) => {
     result.push ? `push ${result.push.ok ? 'sent' : 'failed'}` : null,
   ].filter(Boolean);
   return ok(res, { preview: copy, result }, `Test: ${parts.join(', ')}`);
-});
-
-/*
-  POST /api/admin/campaigns/apply-countdown  { scope?, ids? }
-
-  Puts existing occasions onto the seven-day run-up (-7 / -3 / -2 / -1 / 0).
-
-  The seeder already ships the ramp, but seeding is idempotent by slug and
-  deliberately never overwrites a stored row — so a calendar that was loaded
-  before the countdown existed would keep its old two-beat schedule forever.
-  This is the migration for that, as a button rather than a script the admin
-  cannot run.
-
-  scope 'emailing' (default) upgrades the occasions that already email — the
-  big ones. scope 'all' also sweeps in the minor push-only festivals, which
-  is a real choice: it is five more sends per occasion across ~30 more
-  occasions. Hand-written per-offset copy is never touched either way.
-*/
-const applyCountdownToAll = asyncHandler(async (req, res) => {
-  const scope = req.body?.scope === 'all' ? 'all' : 'emailing';
-  const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Boolean) : null;
-
-  const rows = await CampaignEvent.findAll(ids ? { where: { id: { [Op.in]: ids } } } : {});
-  const changed = [];
-  let skipped = 0;
-
-  for (const row of rows) {
-    const json = row.toJSON();
-    // A per-campaign apply (ids given) is an explicit choice, so it ignores
-    // the emailing/push-only distinction the bulk default draws.
-    const ramp = applyCountdown(json, { scope: ids ? 'all' : scope });
-    if (!ramp) { skipped += 1; continue; }
-    if (isOnCountdown(json)) { skipped += 1; continue; }
-    // eslint-disable-next-line no-await-in-loop
-    await row.update(ramp);
-    changed.push({ id: json.id, name: json.name, channels: json.channels });
-  }
-
-  return ok(
-    res,
-    { updated: changed.length, skipped, campaigns: changed, offsets: COUNTDOWN_OFFSETS },
-    changed.length
-      ? `${changed.length} occasion(s) now run the 7-day countdown`
-      : 'Everything eligible is already on the countdown'
-  );
 });
 
 // POST /api/admin/campaigns/run-now  { id?, date? } — force today's due waves.
@@ -443,6 +489,15 @@ const analytics = asyncHandler(async (req, res) => {
     const o = Number(req.query.offsetDay);
     if (Number.isInteger(o)) where.offsetDay = o;
   }
+
+  /*
+    Test sends are tracked exactly like real ones, and are excluded from every
+    report by default — a handful of admin tests against a small base would
+    otherwise dominate the rates. `includeTests` exists so an admin can watch
+    their own test arrive, which is the entire point of testing.
+  */
+  const includeTests = req.query.includeTests === '1' || req.query.includeTests === 'true';
+  if (!includeTests) where.isTest = false;
 
   const typeFilter = String(req.query.type || '');
   const campaignInclude = {
@@ -638,6 +693,7 @@ const analytics = asyncHandler(async (req, res) => {
     days,
     since,
     attributionDays: ATTRIBUTION_DAYS,
+    includeTests,
     tracking: {
       // Without APP_URL there is no absolute URL to point a pixel at, so
       // campaignEmail.service emits none and every send is unmeasured.
@@ -809,6 +865,16 @@ const recipients = asyncHandler(async (req, res) => {
 
   // The funnel filters are all "this column is set", which keeps them
   // expressible in SQL rather than pulling everything back to filter in JS.
+  /*
+    Three modes, not two. Reports normally hide test sends so a handful of
+    admin tests cannot move the rates; `includeTests` folds them back in; and
+    `tests=only` shows nothing else — which is what the Test sends panel asks
+    for, so an admin can audit exactly what they fired, at what, and what came
+    back, without that audit ever touching the live numbers.
+  */
+  if (req.query.tests === 'only') where.isTest = true;
+  else if (!(req.query.includeTests === '1' || req.query.includeTests === 'true')) where.isTest = false;
+
   const state = String(req.query.state || '');
   if (state === 'opened') where.openedAt = { [Op.ne]: null };
   if (state === 'clicked') where.clickedAt = { [Op.ne]: null };
@@ -824,7 +890,7 @@ const recipients = asyncHandler(async (req, res) => {
     attributes: [
       'id', 'campaignEventId', 'userId', 'channel', 'status', 'offsetDay', 'occurrenceDate',
       'sentAt', 'openedAt', 'clickedAt', 'clickCount', 'clickKind', 'clickVia',
-      'landedAt', 'dwellSeconds',
+      'landedAt', 'dwellSeconds', 'isTest',
     ],
     // Most engaged first: the people who did something are the point of the
     // list, and burying them under a thousand "delivered, nothing" rows would
@@ -904,6 +970,7 @@ const recipients = asyncHandler(async (req, res) => {
       clickVia: j.clickVia,
       landedAt: j.landedAt,
       dwellSeconds: j.dwellSeconds,
+      isTest: !!j.isTest,
       booking: booking
         ? { code: booking.bookingCode, paise: booking.totalPaise, at: booking.createdAt }
         : null,
@@ -1004,7 +1071,6 @@ const resubscribe = asyncHandler(async (req, res) => {
 module.exports = {
   list,
   upcomingSchedule,
-  applyCountdownToAll,
   create,
   update,
   toggle,

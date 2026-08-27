@@ -85,6 +85,17 @@ const CampaignDispatch = sequelize.define(
       dwellSeconds is capped when recorded: a tab left open overnight is not a
       45,000-second reading session, and one such row would wreck an average.
     */
+    /*
+      A send from the admin's Test button.
+
+      Tests have to carry REAL tracking — an untracked test cannot prove the
+      tracking works, which is the only thing a test is for. But they must
+      never move the numbers, so they are flagged here and every report
+      filters them out unless explicitly asked for. One column, rather than a
+      parallel table, because a test IS a dispatch in every other respect.
+    */
+    isTest: { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
+
     landedAt: { type: DataTypes.DATE, allowNull: true },
     dwellSeconds: { type: DataTypes.INTEGER, allowNull: true },
 

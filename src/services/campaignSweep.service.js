@@ -279,6 +279,15 @@ const sendMerged = async ({
           kind: 'campaign',
           campaignSlug: campaign.slug,
           ctaPath: campaign.ctaPath || '/experiences',
+          /*
+            A notification has no links to wrap, so the only moment worth
+            recording is the TAP — and only the app can see that. The token
+            rides in the data payload and the app reports back when the
+            notification is opened, which is what makes push measurable on the
+            same footing as email instead of being a channel nobody can
+            evaluate.
+          */
+          rc: makeTrackToken(row.id),
         },
       });
     }

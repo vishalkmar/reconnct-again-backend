@@ -17,8 +17,7 @@
     "seed:reconnct-taxonomy": "node src/seeders/seedReconnctTaxonomy.js",
     "cleanup-indexes": "node src/scripts/cleanupIndexes.js",
     "seed:campaigns": "node src/seeders/seedCampaignCalendar.js",
-    "migrate:occasions": "node src/scripts/addOccasionColumns.js",
-    "campaigns:countdown": "node src/scripts/applyCampaignCountdown.js"
+    "migrate:occasions": "node src/scripts/addOccasionColumns.js"
   },
   "keywords": [
     "retreats",
