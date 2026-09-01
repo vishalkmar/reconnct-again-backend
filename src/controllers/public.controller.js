@@ -84,14 +84,66 @@ const capacityOf = (exp) => {
   return v ? Number(v) : null;
 };
 
-const audienceCache = {};
-const hydrateAudiences = async (ids) => {
-  const want = (Array.isArray(ids) ? ids : []).filter((id) => !(id in audienceCache));
-  if (want.length) {
-    const rows = await ExperienceAudience.findAll({ where: { id: want } });
-    rows.forEach((a) => { audienceCache[a.id] = { id: a.id, name: a.name, slug: a.slug, icon: a.icon }; });
-  }
-  return (Array.isArray(ids) ? ids : []).map((id) => audienceCache[id]).filter(Boolean);
+/*
+  Taxonomy id -> row, resolved once per process. An experience is tagged with
+  MULTIPLE audiences/categories/types, so every card would otherwise fire a
+  query per tag.
+*/
+const makeHydrator = (Model, shape) => {
+  const cache = {};
+  return async (ids) => {
+    const list = (Array.isArray(ids) ? ids : []).map(Number).filter(Number.isFinite);
+    const want = list.filter((id) => !(id in cache));
+    if (want.length) {
+      const rows = await Model.findAll({ where: { id: want } });
+      rows.forEach((r) => { cache[r.id] = shape(r); });
+    }
+    return list.map((id) => cache[id]).filter(Boolean);
+  };
+};
+
+const hydrateAudiences = makeHydrator(ExperienceAudience, (a) => ({ id: a.id, name: a.name, slug: a.slug, icon: a.icon }));
+const hydrateCategories = makeHydrator(ExperienceCategory, (c) => ({ id: c.id, name: c.name, slug: c.slug, colorHex: c.colorHex }));
+const hydrateTypes = makeHydrator(ExperienceType, (t) => ({ id: t.id, name: t.name, slug: t.slug, categoryId: t.categoryId }));
+
+/*
+  Every category / type an experience carries. categoryIds/typeIds are the real
+  source of truth (the form is multi-select); categoryId/typeId hold only the
+  FIRST one and exist for rows written before that form landed. Filtering on the
+  singular column is what made a listing show up under its first category only.
+*/
+const catIdsOf = (e) => {
+  const list = (Array.isArray(e.categoryIds) ? e.categoryIds : []).map(Number).filter(Number.isFinite);
+  if (list.length) return list;
+  return Number.isFinite(Number(e.categoryId)) ? [Number(e.categoryId)] : [];
+};
+const typeIdsOf = (e) => {
+  const list = (Array.isArray(e.typeIds) ? e.typeIds : []).map(Number).filter(Number.isFinite);
+  if (list.length) return list;
+  return Number.isFinite(Number(e.typeId)) ? [Number(e.typeId)] : [];
+};
+
+/*
+  "All" — i.e. "anyone can do this" — is stored as an EMPTY audiences array;
+  that is exactly what the admin/host form writes when the All chip is picked.
+  So an empty list must match EVERY audience filter, not none of them.
+*/
+const matchesAudience = (e, wanted) => {
+  const own = (Array.isArray(e.audiences) ? e.audiences : []).map(Number);
+  if (!own.length) return true;
+  return wanted.some((id) => own.includes(id));
+};
+
+// "3" and "3,7" both parse — the app sends a comma list for multi-select.
+const idList = (...values) => {
+  const out = [];
+  values.filter((v) => v != null && v !== '').forEach((v) => {
+    String(v).split(',').forEach((part) => {
+      const n = parseInt(part, 10);
+      if (Number.isInteger(n) && !out.includes(n)) out.push(n);
+    });
+  });
+  return out;
 };
 
 const cardShape = async (exp) => {
@@ -110,8 +162,12 @@ const cardShape = async (exp) => {
     longitude: j.longitude != null ? Number(j.longitude) : null,
     rating: Number(j.rating) || 0,
     reviewsCount: Number(j.reviewCount) || 0,
+    // `category`/`type` stay singular for older app builds; `categories`/`types`
+    // are the full multi-select truth the current app filters and labels on.
     category: j.category ? { id: j.category.id, name: j.category.name, slug: j.category.slug, colorHex: j.category.colorHex } : null,
     type: j.type ? { id: j.type.id, name: j.type.name, slug: j.type.slug } : null,
+    categories: await hydrateCategories(catIdsOf(j)),
+    types: await hydrateTypes(typeIdsOf(j)),
     audiences: await hydrateAudiences(j.audiences),
     fromPrice: fromPrice(j),
     currency: j.currency || 'INR',
@@ -240,10 +296,11 @@ const nearbyExperiences = asyncHandler(async (req, res) => {
 });
 
 // GET /api/public/experiences
-//   ?q= &categoryId= &audienceId= &priceMin= &priceMax= &featured=1 &sort=
+//   ?q= &categoryIds= &typeIds= &audienceIds= &priceMin= &priceMax= &featured=1
+//   The singular categoryId / typeId / audienceId are still accepted so older
+//   app builds keep working; each takes a comma list too.
 const listExperiences = asyncHandler(async (req, res) => {
   const where = { status: 'published', isActive: true };
-  if (req.query.categoryId) where.categoryId = parseInt(req.query.categoryId, 10);
   if (req.query.featured === '1' || req.query.featured === 'true') where.isFeatured = true;
   if (req.query.q) {
     where[Op.or] = [
@@ -261,11 +318,24 @@ const listExperiences = asyncHandler(async (req, res) => {
     order: [['sortOrder', 'ASC'], ['createdAt', 'DESC']],
   });
 
-  // audienceId filter is a JSON-array membership test → done in JS to stay
-  // portable across MySQL versions.
-  if (req.query.audienceId) {
-    const aid = parseInt(req.query.audienceId, 10);
-    items = items.filter((e) => Array.isArray(e.audiences) && e.audiences.includes(aid));
+  /*
+    Taxonomy filters are JSON-array membership tests, so they run in JS to stay
+    portable across MySQL versions (the same reason the audience filter always
+    has). Each is a UNION: a listing tagged with three categories shows up under
+    every one of them, not just the first.
+  */
+  const wantCategories = idList(req.query.categoryIds, req.query.categoryId);
+  const wantTypes = idList(req.query.typeIds, req.query.typeId);
+  const wantAudiences = idList(req.query.audienceIds, req.query.audienceId);
+
+  if (wantCategories.length) {
+    items = items.filter((e) => catIdsOf(e).some((id) => wantCategories.includes(id)));
+  }
+  if (wantTypes.length) {
+    items = items.filter((e) => typeIdsOf(e).some((id) => wantTypes.includes(id)));
+  }
+  if (wantAudiences.length) {
+    items = items.filter((e) => matchesAudience(e, wantAudiences));
   }
 
   let cards = await Promise.all(items.map(cardShape));
