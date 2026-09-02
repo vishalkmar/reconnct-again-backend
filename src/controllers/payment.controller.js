@@ -126,6 +126,19 @@ const confirmBookingFromLink = async (booking, link) => {
   if (!booking) return null;
   if (booking.status === 'confirmed' || booking.status === 'completed') return booking;
 
+  // A PAID link only confirms THIS booking if it was actually raised for this
+  // booking's amount. Guards against a booking whose paymentOrderId points at
+  // some other (cheaper, already-paid) link.
+  const expected = Number(fromPaise(booking.totalPaise));
+  const paid = Number(link?.link_amount_paid || link?.link_amount || 0);
+  if (Number.isFinite(expected) && expected > 0 && paid + 0.5 < expected) {
+    console.error(
+      '[payment] REFUSING to confirm %s: link paid %s < booking total %s',
+      booking.bookingCode, paid, expected
+    );
+    return booking;
+  }
+
   booking.status = 'confirmed';
   booking.paymentId = link?.cf_link_id ? String(link.cf_link_id) : booking.paymentId;
   booking.paymentMethod = 'cashfree_link';
@@ -171,16 +184,16 @@ const createLinkForBooking = asyncHandler(async (req, res) => {
   const customer = { name: booking.guestName, email: booking.guestEmail, phone: booking.guestPhone };
   const returnUrl = `${clientUrl()}/booking-success/${booking.bookingCode}`;
 
-  // App-created (direct) link: the app made the Cashfree link itself and just
-  // wants us to remember its id so link-status polling can confirm the booking.
-  // No Cashfree call from here — this is the reliable on-device phase-1 path.
-  const providedLinkId = req.body && req.body.linkId ? String(req.body.linkId) : null;
-  const providedLinkUrl = req.body && req.body.linkUrl ? String(req.body.linkUrl) : null;
-  if (providedLinkId) {
-    booking.paymentOrderId = providedLinkId;
-    await booking.save();
-    return ok(res, { linkUrl: providedLinkUrl, bookingCode: booking.bookingCode }, 'Payment link registered');
-  }
+  /*
+    The link is ALWAYS created here, never accepted from the client.
+
+    This used to take a `linkId` the app had created itself (phase-1, with the
+    Cashfree key shipped inside the APK). That let a caller point a booking at
+    ANY link id — including one they had already paid for on a cheaper booking —
+    and link-status polling would then confirm the expensive booking as paid.
+    Payments are server-authoritative now: the amount comes from the booking row,
+    not the request body.
+  */
 
   try {
     // Reuse an existing link for this booking if one was already created.
