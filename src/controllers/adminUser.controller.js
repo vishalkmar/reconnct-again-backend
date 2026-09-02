@@ -2,6 +2,7 @@ const asyncHandler = require('express-async-handler');
 const { Op, fn, col, literal } = require('sequelize');
 const {
   User, Booking, WalletTransaction, Coupon, WishlistItem, Experience,
+  AccountDeletionRequest,
 } = require('../models');
 const { ok, fail } = require('../utils/response');
 const { fromPaise } = require('../services/booking.service');
@@ -9,6 +10,7 @@ const { publicBooking } = require('./booking.controller');
 const { buildVoucherHtml } = require('../services/bookingEmail.service');
 const { send } = require('../pwa/services/mailer');
 const { emailShell } = require('../utils/emailLayout');
+const { deleteUserAccount } = require('../services/accountDeletion.service');
 
 // Shape returned for the list page — light, only what the table needs. The
 // aggregated counts come from a second grouped query (see `list`).
@@ -436,4 +438,90 @@ const getVoucherHtml = asyncHandler(async (req, res) => {
   return res.send(fullPage);
 });
 
-module.exports = { list, getById, sendEmail, toggleActive, getVoucherHtml };
+/*
+  ── Account deletion requests ─────────────────────────────────────────────
+  Travellers can ask for deletion from the app, the member portal or the public
+  /delete-account page. Every ask lands in account_deletion_requests; an admin
+  reviews the queue here and approves, which is the only thing that actually
+  removes data.
+*/
+
+// GET /api/admin/users/deletion-requests?status=pending
+const listDeletionRequests = asyncHandler(async (req, res) => {
+  const status = ['pending', 'completed', 'rejected'].includes(req.query.status)
+    ? req.query.status
+    : null;
+
+  const rows = await AccountDeletionRequest.findAll({
+    where: status ? { status } : undefined,
+    order: [['status', 'ASC'], ['createdAt', 'DESC']],
+    limit: 500,
+  });
+
+  // The user row is anonymised on approval, so the request's own copy of the
+  // name/email is what keeps the completed rows readable.
+  const pendingCount = await AccountDeletionRequest.count({ where: { status: 'pending' } });
+
+  return ok(res, {
+    requests: rows.map((r) => {
+      const j = r.toJSON();
+      return {
+        id: j.id,
+        userId: j.userId,
+        name: j.name,
+        email: j.email,
+        phone: j.phone,
+        source: j.source,
+        reason: j.reason,
+        status: j.status,
+        requestedAt: j.createdAt,
+        handledAt: j.handledAt,
+        adminNote: j.adminNote,
+      };
+    }),
+    pendingCount,
+  });
+});
+
+// POST /api/admin/users/deletion-requests/:id/approve
+// The irreversible one: wipes the traveller's personal data everywhere.
+const approveDeletionRequest = asyncHandler(async (req, res) => {
+  const request = await AccountDeletionRequest.findByPk(req.params.id);
+  if (!request) return fail(res, 'Request not found', 404);
+  if (request.status !== 'pending') return fail(res, `This request is already ${request.status}`, 400);
+
+  const user = await User.findByPk(request.userId);
+  if (user && user.isActive) {
+    await deleteUserAccount(user);
+  }
+
+  await request.update({
+    status: 'completed',
+    handledAt: new Date(),
+    handledByAdminId: req.admin ? req.admin.id : null,
+    adminNote: req.body && req.body.note ? String(req.body.note).slice(0, 500) : null,
+  });
+
+  return ok(res, {}, 'Account deleted and the request closed.');
+});
+
+// POST /api/admin/users/deletion-requests/:id/reject
+const rejectDeletionRequest = asyncHandler(async (req, res) => {
+  const request = await AccountDeletionRequest.findByPk(req.params.id);
+  if (!request) return fail(res, 'Request not found', 404);
+  if (request.status !== 'pending') return fail(res, `This request is already ${request.status}`, 400);
+
+  await request.update({
+    status: 'rejected',
+    handledAt: new Date(),
+    handledByAdminId: req.admin ? req.admin.id : null,
+    adminNote: req.body && req.body.note ? String(req.body.note).slice(0, 500) : null,
+  });
+
+  return ok(res, {}, 'Request rejected. Nothing was deleted.');
+});
+
+module.exports = {
+  list, getById, sendEmail, toggleActive, getVoucherHtml,
+  listDeletionRequests, approveDeletionRequest, rejectDeletionRequest,
+};

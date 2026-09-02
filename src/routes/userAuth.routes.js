@@ -19,6 +19,11 @@ router.post('/resend-otp', otpLimiter, ctrl.resendOtp);
 // complements the 5-attempt cap already enforced per OTP token in the service.
 router.post('/verify-otp', credentialLimiter, ctrl.verifyOtp);
 
+// Account deletion REQUESTS — the in-app/portal path plus the public web page
+// Play requires. Neither deletes; an admin actions the request.
+router.post('/account/delete-request-me', authenticateUser, ctrl.requestMyDeletion);
+router.post('/account/delete-request', otpLimiter, ctrl.requestAccountDeletion);
+
 router.post('/complete-profile', authenticateUser, ctrl.completeProfile);
 router.get('/me', authenticateUser, ctrl.me);
 router.patch('/profile', authenticateUser, ctrl.updateProfile);

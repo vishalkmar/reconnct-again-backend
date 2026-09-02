@@ -43,6 +43,7 @@ const BlogScene = require('./blogScene.model');
 const User = require('./user.model');
 const UserOtpToken = require('./userOtpToken.model');
 const WishlistItem = require('./wishlistItem.model');
+const AccountDeletionRequest = require('./accountDeletionRequest.model');
 const Booking = require('./booking.model');
 const WalletTransaction = require('./walletTransaction.model');
 const Coupon = require('./coupon.model');
@@ -111,6 +112,7 @@ const db = {
   User,
   UserOtpToken,
   WishlistItem,
+  AccountDeletionRequest,
   Booking,
   WalletTransaction,
   Coupon,
@@ -144,6 +146,12 @@ User.hasMany(User, { foreignKey: 'referredByUserId', as: 'referees' });
 // the manual hydration instead (matches the Review pattern in this codebase).
 User.hasMany(WishlistItem, { foreignKey: 'userId', as: 'wishlistItems', onDelete: 'CASCADE' });
 WishlistItem.belongsTo(User, { foreignKey: 'userId', as: 'user' });
+
+// Deletion requests outlive the account they name — the user row is anonymised
+// rather than dropped, so no cascade here: the request stays as the record of
+// what was removed and when.
+User.hasMany(AccountDeletionRequest, { foreignKey: 'userId', as: 'deletionRequests' });
+AccountDeletionRequest.belongsTo(User, { foreignKey: 'userId', as: 'user' });
 
 // ─── Bookings: belong to a User, polymorphic to the bookable entity ───────
 User.hasMany(Booking, { foreignKey: 'userId', as: 'bookings' });

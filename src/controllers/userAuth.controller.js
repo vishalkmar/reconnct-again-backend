@@ -8,6 +8,9 @@ const { sendUserOtp, sendUserWelcome } = require('../services/userMailer.service
 const { normalizePhone } = require('../services/cashfree.service');
 const { creditReferrerForFirstLogin } = require('../services/referEarn.service');
 const { isEmailBlocked } = require('../services/fraudDetection.service');
+const {
+  createDeletionRequest, sendDeletionRequestedEmail,
+} = require('../services/accountDeletion.service');
 // NOTE: v3 referral system (Jun 2026) — referrer is paid the moment the
 // referee completes their profile (effectively "first login"). Booking is
 // no longer the trigger. The payment hook still calls the legacy v2 path
@@ -283,6 +286,54 @@ const updateProfile = asyncHandler(async (req, res) => {
   return ok(res, { user: publicUser(user) }, 'Profile updated');
 });
 
+/*
+  ── Account deletion requests ──────────────────────────────────────
+  Google Play requires a user to be able to ask for deletion from inside the app
+  AND from a public web page. Neither deletes anything here — the request goes to
+  Admin → Users → Deletion requests, where a person actions it. Deletion is
+  irreversible, so it does not happen on an unattended button press.
+*/
+
+// POST /api/user-auth/account/delete-request-me   (authenticated — app + portal)
+const requestMyDeletion = asyncHandler(async (req, res) => {
+  const user = await User.findByPk(req.user.id);
+  if (!user || !user.isActive) return fail(res, 'Account not found', 404);
+
+  const { created } = await createDeletionRequest({
+    user,
+    source: req.body && req.body.source === 'web' ? 'web' : 'app',
+    reason: req.body && req.body.reason,
+  });
+  if (created) {
+    sendDeletionRequestedEmail({ user })
+      .catch((e) => console.error('[account-delete] receipt email failed:', e.message));
+  }
+  return ok(res, { alreadyPending: !created },
+    created
+      ? 'Your deletion request has been sent. Our team will action it shortly.'
+      : 'You already have a deletion request pending. Our team is on it.');
+});
+
+// POST /api/user-auth/account/delete-request   { email }   (public web page)
+// The reply never changes with whether the address exists, so this page can't be
+// used to find out who has an account.
+const requestAccountDeletion = asyncHandler(async (req, res) => {
+  const email = normalize(req.body && req.body.email);
+  if (!email) return fail(res, 'Email is required', 400);
+
+  const user = await User.findOne({ where: { email } });
+  if (user && user.isActive) {
+    const { created } = await createDeletionRequest({
+      user, source: 'public', reason: req.body && req.body.reason,
+    });
+    if (created) {
+      sendDeletionRequestedEmail({ user })
+        .catch((e) => console.error('[account-delete] receipt email failed:', e.message));
+    }
+  }
+  return ok(res, {}, 'If that email is registered, your deletion request has been received. Our team will action it shortly.');
+});
+
 module.exports = {
   requestOtp,
   resendOtp,
@@ -290,4 +341,6 @@ module.exports = {
   completeProfile,
   me,
   updateProfile,
+  requestMyDeletion,
+  requestAccountDeletion,
 };
