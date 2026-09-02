@@ -18,17 +18,36 @@ const {
 
 const normalize = (email) => String(email || '').toLowerCase().trim();
 
-// ── Phase-1 demo login backdoor ──────────────────────────────────────────
-// A fixed email + OTP so the mobile app can be opened for UI review without a
-// live inbox. It bypasses the real OTP entirely, so it MUST be disabled in
-// production: set DEMO_LOGIN_ENABLED=false (or NODE_ENV=production) and the
-// backdoor stops working — the demo email then has to sign in like any other.
-// Defaults ON so nothing changes for the current app testing.
-const DEMO_EMAIL = 'demo@reconnct.app';
-const DEMO_CODE = '123456';
-const DEMO_LOGIN_ENABLED = process.env.DEMO_LOGIN_ENABLED === 'true'
-  || (process.env.DEMO_LOGIN_ENABLED === undefined && process.env.NODE_ENV !== 'production');
+/*
+  ── Demo login ────────────────────────────────────────────────────────────
+  One account whose OTP is a fixed code, so a reviewer (Google Play's, or ours)
+  can sign in without access to a live inbox.
+
+  This bypasses email verification entirely, which makes it a CREDENTIAL, not
+  configuration — so the address and the code come from the environment and are
+  never written here. Anything hardcoded in this file is in git, readable by
+  anyone with repo access, and cannot be rotated without a deploy.
+
+  It is strictly opt-in: all three vars must be present or the backdoor does not
+  exist at all.
+
+      DEMO_LOGIN_ENABLED=true
+      DEMO_LOGIN_EMAIL=<the demo account's address>
+      DEMO_LOGIN_CODE=<its fixed 6-digit code>
+
+  Unset (the normal state, and every environment by default) means that address
+  signs in like any other account, through a real emailed OTP.
+*/
+const DEMO_EMAIL = normalize(process.env.DEMO_LOGIN_EMAIL);
+const DEMO_CODE = String(process.env.DEMO_LOGIN_CODE || '').trim();
+const DEMO_LOGIN_ENABLED = process.env.DEMO_LOGIN_ENABLED === 'true' && !!DEMO_EMAIL && !!DEMO_CODE;
 const isDemo = (email) => DEMO_LOGIN_ENABLED && normalize(email) === DEMO_EMAIL;
+
+// Loud on boot: a live demo login is exactly the kind of thing that gets
+// switched on for a store review and then forgotten about.
+if (DEMO_LOGIN_ENABLED) {
+  console.warn('[user-auth] DEMO LOGIN IS ENABLED for %s — turn it off once the review is done.', DEMO_EMAIL);
+}
 
 const issueAuthToken = (user) =>
   signToken({ id: user.id, kind: 'user', email: user.email }, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
